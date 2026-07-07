@@ -1,0 +1,186 @@
+---
+title: "createStore — NexusStore Store Factory"
+sidebarTitle: "createStore"
+description: "createStore(initialState) creates a NexusStore store. Returns getState, subscribe, setState, and setMultiple. Must be called outside React components."
+---
+
+`createStore` is the foundational factory function of NexusStore. You pass it a plain JavaScript object representing your initial state, and it returns a store object that holds that state, manages subscriptions, and exposes two update methods — `setState` for targeting a single top-level key and `setMultiple` for batching updates across many keys in a single render cycle. The returned store is framework-agnostic: it works standalone, inside React via `useStore`, or wrapped with `immer()` for mutation-style updates.
+
+## Signature
+
+```ts
+createStore(initialStoreState: object): Store
+```
+
+## Parameters
+
+<ParamField path="initialStoreState" type="object" required>
+  A plain JavaScript object that defines the shape and initial values of your store. Every top-level key in this object becomes an addressable key for `setState`. Nested objects are supported as values, but only top-level keys can be targeted directly.
+</ParamField>
+
+## Returns
+
+`createStore` returns a **store object** with the following properties:
+
+<ResponseField name="getState" type="() => State">
+  Returns the current state snapshot as a plain object. The reference changes every time `setState` or `setMultiple` produces a new state.
+
+  ```js
+  const state = store.getState();
+  console.log(state.count); // 0
+  ```
+</ResponseField>
+
+<ResponseField name="subscribe" type="(listener: () => void) => () => void">
+  Registers a `listener` callback that is called whenever the state changes. Returns an **unsubscribe** function — call it to stop listening.
+
+  ```js
+  const unsubscribe = store.subscribe(() => {
+    console.log("State changed:", store.getState());
+  });
+
+  // Later, to clean up:
+  unsubscribe();
+  ```
+</ResponseField>
+
+<ResponseField name="setState" type="(selectKeyFn, nextStateOrFn) => void">
+  Updates a single top-level key in the store. `selectKeyFn` receives the internal keys object and must return the string key to update. `nextStateOrFn` is either the new value directly or a function that receives the current value and returns the next one. See [`setState`](/api/set-state) for full documentation.
+</ResponseField>
+
+<ResponseField name="setMultiple" type="(nextStateOrFn, replaceStore?) => void">
+  Updates multiple top-level keys in a single operation, notifying all listeners exactly once. `nextStateOrFn` can be a partial state object or a function. See [`setMultiple`](/api/set-multiple) for full documentation.
+</ResponseField>
+
+## The Keys Object
+
+Internally, `createStore` builds a `keys` object by iterating over every top-level property of `initialStoreState` and mapping each key to itself:
+
+```js
+// Given initialStoreState = { count: 0, theme: "light" }
+// createStore builds:
+const keys = {
+  count: "count",
+  theme: "theme",
+};
+```
+
+This `keys` object is what your `selectKeyFn` receives inside `setState`. It provides autocomplete-friendly access to valid store keys, and guards against typos — if you reference a key that was not in the initial state, `setState` logs an error and bails out.
+
+## Critical Rule — Call Outside Components
+
+`createStore` must be called **once**, at module scope, outside of any React component or hook. Calling it inside a component creates a brand-new store on every render, losing all accumulated state.
+
+```js
+// ❌ Wrong — a new store is created on every render
+function MyComponent() {
+  const store = createStore({ count: 0 });
+  // ...
+}
+
+// ✅ Correct — store is created once at module level
+const countStore = createStore({ count: 0 });
+
+function MyComponent() {
+  const count = useStore(countStore, (state) => state.count);
+  // ...
+}
+```
+
+## Code Examples
+
+<CodeGroup>
+
+```js title="Simple counter store"
+import { createStore } from "./NexusStore/core";
+
+const countStore = createStore({
+  count: 0,
+});
+
+// Read state
+console.log(countStore.getState().count); // 0
+
+// Update with a functional updater
+countStore.setState(
+  (keys) => keys.count,
+  (curr) => curr + 1,
+);
+
+// Update with a direct value
+countStore.setState((keys) => keys.count, 42);
+
+console.log(countStore.getState().count); // 42
+```
+
+```js title="Multi-key store"
+import { createStore } from "./NexusStore/core";
+
+const store = createStore({
+  auth: {
+    isLoggedin: true,
+    token: "a1b2c3",
+  },
+  theme: {
+    mode: "dark",
+    color: "#000000",
+  },
+  cart: {
+    items: ["Mango", "Apple", "Banana"],
+    totalQuantity: 3,
+    totalPrice: 75,
+  },
+  settings: {
+    notificationsEnabled: true,
+    language: "en",
+    currency: "USD",
+  },
+});
+```
+
+```js title="Immer-wrapped store"
+import { createStore } from "./NexusStore/core";
+import { immer } from "./NexusStore/immer";
+
+// Wrap with immer() so functional updaters receive a mutable draft
+export const store = immer(createStore({
+  auth: { isLoggedin: true, token: "a1b2c3" },
+  cart: { items: ["Mango", "Apple"], totalQuantity: 2 },
+}));
+
+// Mutate nested state directly — no spread needed
+store.setState(
+  (keys) => keys.cart,
+  (draft) => {
+    draft.items.push("Kiwi");
+    draft.totalQuantity += 1;
+  },
+);
+```
+
+</CodeGroup>
+
+## Error Handling
+
+`createStore` itself never throws. However, the `setState` method on the returned store logs descriptive errors to the console in two situations:
+
+**First argument is not a function:**
+
+```
+[Store Error]: The first argument must be a selector function.
+Usage: setState((keys) => keys.username, nextValue)
+```
+
+This fires when you pass a string, number, or any non-function value as the first argument to `setState`.
+
+**Selected key does not exist in the initial state:**
+
+```
+[Store Error]: Selected key "${key}" is invalid or does not exist in the initial state.
+```
+
+This fires when `selectKeyFn` returns a string that was never a top-level key in `initialStoreState` — for example, if you mistype a key name or try to address a nested path like `keys.cart.items`.
+
+<Note>
+  Both error cases return early without modifying state or notifying listeners, so your UI remains consistent even when a bad update is attempted.
+</Note>

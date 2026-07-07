@@ -1,0 +1,140 @@
+---
+title: "Optimizing Re-renders with Stable Selectors"
+sidebarTitle: "Selector Optimization"
+description: "Inline selector functions create new references on every render. Use module-level selectors or useCallback to keep subscriptions stable and fast."
+---
+
+`useStore` accepts a selector function as its second argument. That selector is called on every store notification to determine whether the subscribed component should re-render — React compares the previous and next return values and skips the render if they are equal. The selector function itself, however, is also part of the subscription equation: `useStore` internally wraps it in `useCallback`, so if the selector reference changes between renders, the subscription is rebuilt unnecessarily. For most apps this is imperceptible, but in large component trees with high update frequency it adds up. The fix is simple — keep your selector reference stable.
+
+## The Problem with Inline Selectors
+
+When a selector is written as an inline arrow function, JavaScript creates a brand-new function object on every render. The function body is identical, but the reference is different:
+
+```jsx title="Inline selector — new reference on every render"
+export default function CartComponent() {
+  // A new function object is created each time CartComponent renders
+  const cartItems = useSelector((state) => state.cart.items);
+  // ...
+}
+```
+
+This works correctly — the component only re-renders when `cart.items` actually changes — but the subscription rebuilds on every render because `useStore` sees a different selector reference each time. For small apps this is fine. In a large tree it creates unnecessary overhead.
+
+## Solution 1: Module-Level Selector (Recommended)
+
+Define the selector outside the component at module scope. A module-level function is created once when the module loads and its reference never changes, regardless of how many times the component re-renders.
+
+```jsx title="Module-level selector — zero reference churn"
+import { useCallback } from "react";
+import { useSelector } from "../store/hooks";
+import { store } from "../store/store";
+
+// Defined once at module scope — reference is permanently stable
+const cartItemsSelector = (state) => state.cart.items;
+
+export default function CartComponent() {
+  const cartItems = useSelector(cartItemsSelector);
+  // ...
+}
+```
+
+This is the pattern commented out in `CartComponent.jsx` in the source:
+
+```jsx title="src/components/CartComponent.jsx (module-level selector)"
+// const cartItemsSelector = (state) => state.cart.items;
+
+export default function CartComponent() {
+  // const cartItems = useSelector(cartItemsSelector);
+}
+```
+
+<Tip>
+  Module-level selectors are also easy to share. If two components subscribe to the same slice of state, they can import and reuse the same selector function rather than each defining their own.
+</Tip>
+
+## Solution 2: `useCallback`
+
+When a selector must be defined inside the component — for example because it closes over a prop or local variable — wrap it with `useCallback` so React memoizes the reference across renders.
+
+`CartComponent` in the source uses this pattern as its active implementation:
+
+```jsx title="src/components/CartComponent.jsx"
+import { useCallback } from "react";
+import { useSelector } from "../store/hooks";
+import { store } from "../store/store";
+
+export default function CartComponent() {
+  console.log("%c CartComponent Rendered", "color: pink");
+
+  // useCallback memoizes the selector — same reference until deps change
+  const cartItems = useSelector(useCallback((state) => state.cart.items, []));
+
+  function handlePushItem() {
+    store.setState(
+      (keys) => keys.cart,
+      (draft) => {
+        draft.items.push("Kiwi");
+      },
+    );
+  }
+
+  function handleRemoveItem() {
+    store.setState(
+      (keys) => keys.cart,
+      (draft) => {
+        draft.items.pop();
+      },
+    );
+  }
+
+  return (
+    <fieldset>
+      <legend>Cart</legend>
+      <ul>
+        {cartItems.map((cartItem) => (
+          <li key={cartItem}>{cartItem}</li>
+        ))}
+      </ul>
+      <button onClick={handlePushItem}>Push Item</button>
+      <button onClick={handleRemoveItem}>Remove Item</button>
+    </fieldset>
+  );
+}
+```
+
+The empty dependency array `[]` means the selector reference is created once and reused for the component's entire lifetime — identical behaviour to a module-level selector, just scoped to the component instance.
+
+When the selector does close over a changing value, list that value in the dependency array so the selector updates when needed:
+
+```jsx title="Selector that closes over a prop"
+export default function ProductRow({ category }) {
+  const items = useSelector(
+    useCallback(
+      (state) => state.catalog.items.filter((i) => i.category === category),
+      [category], // rebuild selector when category prop changes
+    ),
+  );
+  // ...
+}
+```
+
+## Anti-Pattern: Inline Selector
+
+The inline form is not wrong — it will keep your component data-correct. It is simply not optimal for frequently-rendering components in large applications.
+
+```jsx title="Inline selector — functionally correct, not optimal at scale"
+// Works, but rebuilds the subscription on every render
+const cartItems = useSelector((state) => state.cart.items);
+```
+
+<Note>
+  For most apps with a moderate number of components, inline selectors are perfectly acceptable. Reach for module-level selectors or `useCallback` when React DevTools Profiler shows a component re-rendering more often than expected, or when you are building a library on top of NexusStore.
+</Note>
+
+## Comparison
+
+| Approach | Reference stability | When to use |
+|---|---|---|
+| **Module-level selector** | ✅ Always stable — defined once at module load | Default choice for any selector that does not need component-local variables |
+| **`useCallback` selector** | ✅ Stable until deps change | Selector that closes over props or state local to the component |
+| **Inline selector** | ❌ New reference every render | Prototyping, small apps, or when profiling confirms it is not a bottleneck |

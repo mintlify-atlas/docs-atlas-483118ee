@@ -1,0 +1,232 @@
+---
+title: "Subscribing to State with useStore"
+sidebarTitle: "Using useStore"
+description: "The useStore hook connects React components to NexusStore stores. Use selectors to subscribe to specific slices and prevent unnecessary re-renders."
+---
+
+`useStore` is the bridge between your NexusStore stores and your React components. Call it inside any component to subscribe to state — the component will automatically re-render whenever the data it cares about changes, and stay silent when unrelated parts of the store update.
+
+## How `useStore` works
+
+Under the hood, `useStore` delegates to React's built-in `useSyncExternalStore` hook, which is specifically designed for integrating external (non-React) state containers with React's concurrent rendering model:
+
+```js title="src/NexusStore/useStore.js"
+import { useCallback, useSyncExternalStore } from "react";
+
+export function useStore(storeRef, selector) {
+    const getSnapshot = useCallback(() => {
+        const fullState = storeRef.getState();
+        return selector ? selector(fullState) : fullState;
+    }, [storeRef, selector]);
+
+    return useSyncExternalStore(storeRef.subscribe, getSnapshot);
+}
+```
+
+On each render, `useSyncExternalStore` calls `getSnapshot` to read the current value and compares the result with the previous snapshot using `Object.is`. If the value has not changed, the component skips re-rendering entirely.
+
+## Two usage patterns
+
+You can call `useStore` in two ways depending on how much of the store your component needs.
+
+<Tabs>
+  <Tab title="Full Store">
+    Omit the selector to subscribe to the **entire state object**. The component will re-render whenever **any** key in the store changes — even keys it doesn't read.
+
+    ```jsx title="Subscribe to the full store"
+    import { useStore } from "nexus-store";
+    import { countStore } from "./countStore";
+
+    function CountDisplay() {
+      // Re-renders on ANY change to countStore
+      const state = useStore(countStore);
+
+      return <p>Count: {state.count}</p>;
+    }
+    ```
+
+    This is convenient for small stores with only one or two keys, but can cause excess re-renders in larger stores.
+  </Tab>
+  <Tab title="Slice Selector">
+    Pass a selector function as the second argument to subscribe to a **specific slice**. The component only re-renders when the selected value changes.
+
+    ```jsx title="Subscribe to a specific slice"
+    import { useStore } from "nexus-store";
+    import { countStore } from "./countStore";
+
+    function CountDisplay() {
+      // Re-renders ONLY when count changes
+      const count = useStore(countStore, (state) => state.count);
+
+      return <p>Count: {count}</p>;
+    }
+    ```
+
+    The selector receives the full state object and returns whatever slice you need — a primitive, a sub-object, or a derived value.
+  </Tab>
+</Tabs>
+
+## Real-world examples
+
+The source components demonstrate both approaches in practice.
+
+`CountComponent` subscribes to the `count` key in isolation. Even if other keys were added to `countStore`, this component would only re-render when `count` itself changes:
+
+```jsx title="src/components/CountComponent.jsx"
+import { useStore } from "../NexusStore/useStore";
+import { createStore } from "../NexusStore/core";
+
+const countStore = createStore({
+    count: 0,
+});
+
+export default function CountComponent() {
+    const countValue = useStore(countStore, (state) => state.count);
+
+    return (
+        <fieldset>
+            <legend>Count</legend>
+            <p>{countValue}</p>
+            <button
+                onClick={() =>
+                    countStore.setState(
+                        (keys) => keys.count,
+                        (curr) => curr + 1,
+                    )
+                }
+            >
+                Increment
+            </button>
+            <button
+                onClick={() =>
+                    countStore.setState(
+                        (keys) => keys.count,
+                        (curr) => Math.max(0, curr - 1),
+                    )
+                }
+            >
+                Decrement
+            </button>
+        </fieldset>
+    );
+}
+```
+
+`ThemeComponent` uses the `useThemeStore` custom hook from `hooks.js`, which itself wraps `useStore`. The selector drills straight to the `theme` string:
+
+```jsx title="src/components/ThemeComponent.jsx"
+import { useThemeStore } from "../store/hooks";
+import { themeStore } from "../store/store";
+
+export default function ThemeComponent() {
+    const theme = useThemeStore((state) => state.theme);
+
+    return (
+        <fieldset>
+            <legend>Theme</legend>
+            <p>Current Theme: {theme}</p>
+            <button
+                onClick={() =>
+                    themeStore.setState(
+                        (keys) => keys.theme,
+                        theme === "light" ? "dark" : "light",
+                    )
+                }
+            >
+                Toggle Theme
+            </button>
+        </fieldset>
+    );
+}
+```
+
+## The selector function
+
+The selector is an ordinary function with the signature `(state) => value`. It can return anything:
+
+```js title="Selector examples"
+// Return a primitive
+useStore(countStore, (state) => state.count);
+
+// Return a nested value
+useStore(store, (state) => state.auth.isLoggedin);
+
+// Return a derived value
+useStore(store, (state) => state.cart.items.length);
+
+// Return a sub-object (see selector stability note below)
+useStore(store, (state) => state.cart);
+```
+
+<Tip>
+  When a selector returns an object or array, `useSyncExternalStore` compares it by **reference** using `Object.is`. If your selector creates a new object on every call (e.g. `(state) => ({ ...state.cart })`), it will trigger a re-render every time — even if the data is identical. Return the existing reference when possible.
+</Tip>
+
+## Error behavior
+
+`useStore` validates the selector before use. Passing a non-function value as the second argument throws an error immediately with a descriptive message:
+
+```js title="Error thrown for invalid selector type"
+// This throws:
+useStore(countStore, "count");
+
+// Error:
+// [Store Error]: Invalid selector type.
+//
+// Expected: "function"
+// Received: "string"
+//
+// Usage Examples:
+// - Specific state: useStore(store, (state) => state.value)
+// - Complete store: useStore(store)
+```
+
+Passing `undefined` as the selector is always safe — that is how the full-store pattern works.
+
+## Best practices
+
+<Steps>
+  <Step title="Always use a selector">
+    Even for small stores, a selector makes your component's data dependency explicit and prevents re-renders from unrelated state changes.
+
+    ```jsx
+    // ✅ Preferred — component is insulated from other keys
+    const count = useStore(countStore, (state) => state.count);
+
+    // ⚠️  Acceptable only for single-key stores
+    const state = useStore(countStore);
+    ```
+  </Step>
+  <Step title="Keep selectors stable">
+    Inline arrow functions create a new function reference on every render. While `useStore` wraps `getSnapshot` in `useCallback`, an unstable selector will still defeat memoisation. For selectors that return objects or arrays, define them outside the component or wrap them with `useCallback`.
+
+    ```jsx
+    // ✅ Stable — defined outside the component
+    const cartItemsSelector = (state) => state.cart.items;
+
+    function CartComponent() {
+      const items = useStore(store, cartItemsSelector);
+      // ...
+    }
+    ```
+
+    ```jsx
+    // ✅ Also stable — memoised with useCallback
+    const items = useStore(
+      store,
+      useCallback((state) => state.cart.items, [])
+    );
+    ```
+
+    See [Selector Optimisation](/advanced/selector-optimization) for a deeper look at referential stability.
+  </Step>
+  <Step title="Use custom hooks per store">
+    Wrapping `useStore` in a custom hook (as `hooks.js` does with `useThemeStore` and `useAuthStore`) hides the store reference from components and gives you a single place to update the selector signature if your state shape changes.
+
+    ```js title="src/store/hooks.js"
+    export function useThemeStore(selector) {
+        return useStore(themeStore, selector);
+    }
+    ```
+  </Step>
+</Steps>

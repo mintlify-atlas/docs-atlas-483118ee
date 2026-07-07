@@ -1,0 +1,179 @@
+---
+title: "setMultiple — Batch Update Multiple Store Keys"
+sidebarTitle: "setMultiple"
+description: "setMultiple updates multiple keys in one render cycle. Accepts a plain object, function, or Immer draft mutator, with an optional replaceStore flag."
+---
+
+`setMultiple` lets you update any number of top-level keys in a single operation. Rather than calling `setState` once per key — which would notify all listeners and potentially trigger a re-render after each individual call — `setMultiple` computes the entire next state first and then fires listeners exactly once. This is the right tool whenever two or more keys need to change together atomically, such as clearing auth state and resetting a theme in the same user action.
+
+## Signature
+
+```ts
+store.setMultiple(
+  nextStateOrFn:
+    | Partial<State>
+    | ((state: State) => Partial<State>)
+    | ((draft: Draft<State>) => void),
+  replaceStore?: boolean
+): void
+```
+
+## Parameters
+
+<ParamField path="nextStateOrFn" type="Partial<State> | ((state: State) => Partial<State>) | ((draft: Draft<State>) => void)" required>
+  The update to apply. Three forms are accepted depending on whether the store is Immer-wrapped:
+
+  - **Plain object** — merged into the current state with `{ ...state, ...nextStateOrFn }`.
+  - **Function returning an object** — called with the current state; the returned object is merged (or used as a replacement if `replaceStore` is `true`).
+  - **Draft mutator** (Immer-wrapped stores only) — called with a mutable Immer draft of the full store; mutations are applied automatically.
+
+  The resolved value must be a non-null, non-array plain object. Anything else triggers a console error and the update is aborted.
+</ParamField>
+
+<ParamField path="replaceStore" type="boolean" default="false">
+  When `false` (the default), the resolved object is **shallow-merged** into the existing state, preserving any keys you did not include. When `true`, the resolved object **completely replaces** the store state — any top-level key not present in the new object is permanently removed.
+</ParamField>
+
+## Three Call Patterns
+
+<Tabs>
+
+<Tab title="Immer Draft">
+When the store is wrapped with `immer()`, the function you pass to `setMultiple` receives a mutable draft of the **entire** store state. Mutate as many keys as you need — Immer produces the next immutable state in one shot.
+
+```jsx title="SetMultiple.jsx — Immer draft mutator"
+import { useSelector } from "../store/hooks";
+import { store } from "../store/store";
+// store = immer(createStore({ auth: {...}, theme: {...}, cart: {...}, settings: {...} }))
+
+export default function SetMultiple() {
+  const auth = useSelector((state) => state.auth);
+  const theme = useSelector((state) => state.theme);
+
+  function handleAuthAndTheme() {
+    store.setMultiple((draft) => {
+      draft.auth.isLoggedin = false;
+      draft.theme.mode = "light";
+      draft.theme.color = "#ffffff";
+    });
+    // auth, theme, and cart/settings are all preserved;
+    // only the mutated fields change.
+  }
+
+  return (
+    <fieldset>
+      <legend>Cart</legend>
+      <p>Auth: {auth.isLoggedin ? "Logged In" : "Logged Out"}</p>
+      <p style={{ border: `1px solid ${theme.color}` }}>
+        Theme: {theme.mode}
+      </p>
+      <button onClick={handleAuthAndTheme}>Set Multiple</button>
+    </fieldset>
+  );
+}
+```
+</Tab>
+
+<Tab title="Plain Object">
+Pass a partial state object. It is shallow-merged into the existing store state, so only the keys you include are updated. Keys you omit are left untouched.
+
+```js title="Plain object merge"
+import { store } from "./store/store";
+
+// Only "auth" and "theme" are updated.
+// "cart" and "settings" remain unchanged.
+store.setMultiple({
+  auth: {
+    isLoggedin: false,
+  },
+  theme: {
+    mode: "light",
+    color: "#ffffff",
+  },
+});
+```
+</Tab>
+
+<Tab title="Functional">
+Pass a function that receives the current state and returns a partial object. Use this pattern when the new values depend on the existing state.
+
+```js title="Functional update — derive from current state"
+import { store } from "./store/store";
+
+// Toggle isLoggedin based on its current value
+store.setMultiple((state) => ({
+  auth: {
+    isLoggedin: !state.auth.isLoggedin,
+  },
+  theme: {
+    mode: "light",
+    color: "#ffffff",
+  },
+}));
+```
+</Tab>
+
+</Tabs>
+
+## The `replaceStore` Flag
+
+Setting `replaceStore` to `true` makes `setMultiple` use the resolved object as the **entire** new store state, replacing rather than merging.
+
+```js title="Replace with a plain object"
+store.setMultiple(
+  {
+    auth: { isLoggedin: false },
+    theme: { mode: "light", color: "#ffffff" },
+  },
+  true, // replaceStore = true
+);
+// "cart" and "settings" no longer exist in the store.
+```
+
+```js title="Replace with a functional update"
+store.setMultiple(
+  (state) => ({
+    auth: { isLoggedin: !state.auth.isLoggedin },
+    theme: { mode: "light", color: "#ffffff" },
+  }),
+  true, // replaceStore = true
+);
+```
+
+<Warning>
+  When `replaceStore` is `true`, every top-level key that is absent from the new object is **permanently removed** from the store. Any component subscribed to a removed key will receive `undefined` on the next render. Use this flag only when you intentionally want a full reset — for example, after a logout that wipes all user-specific state.
+</Warning>
+
+## Error Case — Invalid Return Value
+
+If `nextStateOrFn` is a function and it returns something that is not a plain object — such as `null`, an array, or a primitive — `setMultiple` logs an error and aborts without touching state:
+
+```
+[Store Error]: State update failed. Expected an object or a function returning an object.
+Please check your setMultiple arguments.
+```
+
+## setState Twice vs. setMultiple Once
+
+When you need to update two keys together, prefer `setMultiple` over two consecutive `setState` calls. The difference matters for components subscribed to both keys: with separate `setState` calls, the component may re-render twice (once per key change); with `setMultiple`, it re-renders exactly once.
+
+```js title="❌ Two setState calls — two listener notifications"
+store.setState(
+  (keys) => keys.auth,
+  (draft) => { draft.isLoggedin = false; },
+);
+store.setState(
+  (keys) => keys.theme,
+  (draft) => { draft.mode = "light"; draft.color = "#ffffff"; },
+);
+// Listeners fire twice — components subscribed to both keys may render twice.
+```
+
+```js title="✅ setMultiple — single listener notification"
+store.setMultiple((draft) => {
+  draft.auth.isLoggedin = false;
+  draft.theme.mode = "light";
+  draft.theme.color = "#ffffff";
+});
+// Listeners fire once — guaranteed single render cycle.
+```

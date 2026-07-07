@@ -1,0 +1,237 @@
+---
+title: "Updating State with setState"
+sidebarTitle: "Updating State"
+description: "setState updates a single top-level key in a NexusStore store. Use a key-selector function and either a direct value or an updater function."
+---
+
+`setState` is the primary way to update individual keys in a NexusStore store. Every call targets exactly one top-level key and either replaces its value directly or derives the next value from the current one. NexusStore will only notify subscribers if the value actually changed.
+
+## Signature
+
+```js title="setState signature"
+store.setState(selectKeyFn, nextStateOrFn)
+```
+
+| Argument | Type | Description |
+|---|---|---|
+| `selectKeyFn` | `(keys) => string` | A function that receives the store's internal `keys` object and returns the key to update. |
+| `nextStateOrFn` | `any \| (current) => any` | Either the next value directly, or an updater function that receives the current value and returns the next. |
+
+## The first argument — key-selector function
+
+NexusStore builds a `keys` mirror of your initial state when `createStore` is called. Each key in your state object becomes a string property on `keys`:
+
+```js title="How the keys object maps to your state"
+const countStore = createStore({ count: 0 });
+// Internal keys: { count: 'count' }
+
+const themeStore = createStore({ theme: "light" });
+// Internal keys: { theme: 'theme' }
+```
+
+You reference the key you want to update by passing a function that receives this `keys` object and returns the desired key string:
+
+```js title="Key-selector function"
+// Select the 'count' key
+countStore.setState((keys) => keys.count, 10);
+
+// Select the 'theme' key
+themeStore.setState((keys) => keys.theme, "dark");
+```
+
+Using `(keys) => keys.count` instead of `() => "count"` gives you autocomplete support in editors and makes the reference safe to rename via automated refactoring tools.
+
+## The second argument — direct value or updater function
+
+You can supply the new value in two ways depending on whether the next state depends on the current state.
+
+<CodeGroup>
+  ```js title="Direct value"
+  // Replace count with a known value
+  countStore.setState((keys) => keys.count, 10);
+
+  // Toggle theme with a known next value
+  themeStore.setState(
+    (keys) => keys.theme,
+    theme === "light" ? "dark" : "light",
+  );
+  ```
+
+  ```js title="Functional update"
+  // Derive next value from current value
+  countStore.setState(
+    (keys) => keys.count,
+    (curr) => curr + 1,
+  );
+
+  // Safe decrement: never go below zero
+  countStore.setState(
+    (keys) => keys.count,
+    (curr) => Math.max(0, curr - 1),
+  );
+  ```
+</CodeGroup>
+
+The updater function receives the current value of the selected key and must return the next value. Use this pattern whenever the new state depends on what the state is right now — it's safer than reading state outside the call because NexusStore guarantees the value passed to the updater is always the latest.
+
+## Real-world examples
+
+### CountComponent — increment and decrement
+
+`CountComponent` uses the functional update pattern for both its buttons, so each click is relative to the current count regardless of how fast the user clicks:
+
+```jsx title="src/components/CountComponent.jsx"
+const countStore = createStore({
+    count: 0,
+});
+
+export default function CountComponent() {
+    const countValue = useStore(countStore, (state) => state.count);
+
+    return (
+        <fieldset>
+            <legend>Count</legend>
+            <p>{countValue}</p>
+            <button
+                onClick={() =>
+                    countStore.setState(
+                        (keys) => keys.count,
+                        (curr) => curr + 1,
+                    )
+                }
+            >
+                Increment
+            </button>
+            <button
+                onClick={() =>
+                    countStore.setState(
+                        (keys) => keys.count,
+                        (curr) => Math.max(0, curr - 1),
+                    )
+                }
+            >
+                Decrement
+            </button>
+        </fieldset>
+    );
+}
+```
+
+### ThemeComponent — direct value toggle
+
+`ThemeComponent` already has the current theme value from `useStore`, so it calculates the next theme inline and passes it as a direct value:
+
+```jsx title="src/components/ThemeComponent.jsx"
+export default function ThemeComponent() {
+    const theme = useThemeStore((state) => state.theme);
+
+    return (
+        <fieldset>
+            <legend>Theme</legend>
+            <p>Current Theme: {theme}</p>
+            <button
+                onClick={() =>
+                    themeStore.setState(
+                        (keys) => keys.theme,
+                        theme === "light" ? "dark" : "light",
+                    )
+                }
+            >
+                Toggle Theme
+            </button>
+        </fieldset>
+    );
+}
+```
+
+### AuthComponent — updater with Immer
+
+`AuthComponent` updates a nested object inside the `auth` key. Because `setState` only merges at the top-level, the component uses `immer`'s `produce` as the updater function to mutate the nested value safely:
+
+```jsx title="src/components/AuthComponent.jsx"
+import { produce } from "immer";
+
+export default function AuthComponent() {
+    const auth = useAuthStore((state) => state.auth);
+
+    return (
+        <fieldset>
+            <legend>Auth</legend>
+            <p>{auth.isLoggedin ? "Logged In" : "Logged Out"}</p>
+            <button
+                onClick={() =>
+                    authStore.setState(
+                        (keys) => keys.auth,
+                        produce((draft) => {
+                            draft.isLoggedin = !draft.isLoggedin;
+                        }),
+                    )
+                }
+            >
+                Toggle Auth
+            </button>
+        </fieldset>
+    );
+}
+```
+
+## Top-level keys only
+
+`setState` operates exclusively on **top-level keys**. Attempting to target a nested path will fail because the key will not be found in the `keys` object.
+
+```js title="✅ / ❌ Key-selector scope"
+// ✅ Top-level key — works correctly
+store.setState((keys) => keys.cart, nextCartValue);
+
+// ❌ Nested path — keys.cart.items is undefined;
+//    NexusStore will log an error and skip the update
+store.setState((keys) => keys.cart.items, ["Mango"]);
+```
+
+To update deeply nested values, select the top-level key and supply an updater function that returns a new version of the nested structure — either manually or with `immer`'s `produce`, as shown in the `AuthComponent` example above.
+
+## Object identity check — no unnecessary re-renders
+
+Before notifying any subscriber, NexusStore compares the current value with the next value using `Object.is`. If they are the same, the update is silently dropped and no component re-renders:
+
+```js title="Identity check inside setState (from core.js)"
+if (!Object.is(currentState, nextState)) {
+    state = {
+        ...state,
+        [key]: nextState,
+    };
+    listeners.forEach((listener) => listener());
+}
+```
+
+This means calling `setState` with the same primitive value twice in a row is always safe — the second call costs nothing:
+
+```js title="Idempotent setState calls"
+// Second call is a no-op — no re-render
+countStore.setState((keys) => keys.count, 0);
+countStore.setState((keys) => keys.count, 0); // silently ignored
+```
+
+<Note>
+  For objects and arrays, `Object.is` compares by **reference**. If your updater function returns a new object that is structurally equal to the previous value, NexusStore will still treat it as a change and notify subscribers. Always return the exact same reference if you intend a no-op.
+</Note>
+
+## Error cases
+
+NexusStore logs a console error (and returns early) in two situations:
+
+```js title="Error: non-function first argument"
+// ❌ Passing a string instead of a selector function
+countStore.setState("count", 10);
+// [Store Error]: The first argument must be a selector function.
+// Usage: setState((keys) => keys.username, nextValue)
+```
+
+```js title="Error: key not found in store"
+// ❌ Selecting a key that was not in the initial state
+countStore.setState((keys) => keys.nonExistent, 42);
+// [Store Error]: Selected key "nonExistent" is invalid or
+// does not exist in the initial state.
+```
+
+Neither error throws — the update is simply skipped, which keeps the rest of your application running. Check the browser console if a state update appears to have no effect.

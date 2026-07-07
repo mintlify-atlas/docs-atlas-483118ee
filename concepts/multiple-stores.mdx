@@ -1,0 +1,181 @@
+---
+title: "Structuring Multiple Stores by Domain"
+sidebarTitle: "Multiple Stores"
+description: "Split your app's state into domain-specific NexusStore stores. Learn when to use one store vs many and how to design a clean store architecture."
+---
+
+NexusStore puts no limit on how many stores you create. Rather than fitting all your application state into a single monolithic object, you can — and usually should — split it into small, focused stores that each own a distinct domain. This keeps your code easy to reason about and means components only re-render when the state they actually use changes.
+
+## When to use multiple stores
+
+The clearest signal to reach for a separate store is that two pieces of state are **independent** — they have no shared actions, they are subscribed to by different components, and updating one never logically requires updating the other. Theme preference, authentication status, shopping cart contents, and user settings all fit this description.
+
+A good rule of thumb:
+
+<Note>
+  Separate stores are completely isolated. Calling `setState` on `themeStore` will never notify subscribers of `authStore` — even if a component happens to subscribe to both. Each store manages its own listener set entirely independently.
+</Note>
+
+## A real-world example: `store.js`
+
+The `src/store/store.js` file in the source repo shows two separate, focused stores alongside a larger combined store:
+
+```js title="src/store/store.js"
+import { createStore } from "../NexusStore/core";
+
+// Thin store: one key, one concern
+const themeState = {
+    theme: "light",
+};
+
+// Thin store: one key, one concern
+const authState = {
+    auth: {
+        isLoggedin: false,
+    },
+};
+
+// Wider store: multiple related domains in one place
+const state = {
+    auth: {
+        isLoggedin: true,
+        token: "a1b2c3",
+    },
+    theme: {
+        mode: "dark",
+        color: "#000000",
+    },
+    cart: {
+        items: ["Mango", "Apple", "Banana"],
+        totalQuantity: 3,
+        totalPrice: 75,
+    },
+    settings: {
+        notificationsEnabled: true,
+        language: "en",
+        currency: "USD",
+    },
+};
+
+export const themeStore = createStore(themeState);
+export const authStore  = createStore(authState);
+export const store      = createStore(state);
+```
+
+`themeStore` and `authStore` are small single-key stores — easy to test, easy to extend, and impossible to accidentally bloat. `store` groups several domains that belong to the same application context and may need to update together (see `setMultiple` below).
+
+## The golden rule: same action or separate action?
+
+The most important question to ask when deciding whether to split state is: *"Does a single user action need to update multiple fields at the same time?"*
+
+| Scenario | Recommendation |
+|---|---|
+| One action updates two or more keys together | Keep them in the **same store** and use `setMultiple` |
+| Two pieces of state change independently | Put them in **separate stores** |
+| A component needs both pieces of state | That's fine — subscribe to both stores separately |
+
+### Using `setMultiple` for co-ordinated updates
+
+When fields within the same store change together, `setMultiple` lets you apply them atomically — subscribers are notified once, not once per field:
+
+```js title="setMultiple — update several keys in one call"
+// After checkout, reset cart and update settings in one notification
+store.setMultiple((currentState) => ({
+    cart: {
+        items: [],
+        totalQuantity: 0,
+        totalPrice: 0,
+    },
+    settings: {
+        ...currentState.settings,
+        currency: "EUR",
+    },
+}));
+```
+
+By default `setMultiple` merges the returned object into the existing state (shallow merge). Pass `true` as the second argument to replace the store entirely:
+
+```js title="setMultiple with replace — replaces the entire store state"
+store.setMultiple(newState, true);
+```
+
+## Cross-store updates
+
+When you have two separate stores and a single user action should update both, call `setState` on each store in sequence inside the same event handler:
+
+```jsx title="Resetting auth and theme from one handler"
+import { authStore, themeStore } from "./store/store";
+
+function handleReset() {
+    // Update authStore
+    authStore.setState(
+        (keys) => keys.auth,
+        { isLoggedin: false },
+    );
+
+    // Update themeStore independently
+    themeStore.setState(
+        (keys) => keys.theme,
+        "light",
+    );
+}
+```
+
+React batches state updates that originate from the same event handler (in React 18 and above), so both changes will be flushed together and your UI will update in one pass.
+
+<Tip>
+  If you find yourself frequently writing cross-store update handlers, that's a signal that the two stores might actually be in the same domain and could benefit from being combined under a single store with `setMultiple`.
+</Tip>
+
+## Custom hooks per store
+
+Exposing stores directly from `store.js` works, but a cleaner pattern is to wrap each store in a custom hook. The `src/store/hooks.js` file demonstrates this:
+
+```js title="src/store/hooks.js"
+import { useStore } from "../NexusStore/useStore";
+import { authStore, themeStore, store } from "./store";
+
+export function useThemeStore(selector) {
+    return useStore(themeStore, selector);
+}
+
+export function useAuthStore(selector) {
+    return useStore(authStore, selector);
+}
+
+export function useSelector(selector) {
+    return useStore(store, selector);
+}
+```
+
+Components import the hook, not the raw store reference. This gives you one place to change the underlying store or add cross-cutting logic (like logging) without touching every component that uses it.
+
+See [Custom Hooks](/advanced/custom-hooks) for a deeper guide on building and composing store hooks.
+
+## Organising stores at scale
+
+<Steps>
+  <Step title="One file per domain (recommended for large apps)">
+    As your application grows, split stores into domain files and co-locate their hooks:
+
+    ```
+    src/
+      stores/
+        auth/
+          store.js    ← createStore(authState)
+          hooks.js    ← useAuthStore
+        cart/
+          store.js    ← createStore(cartState)
+          hooks.js    ← useCartStore
+        theme/
+          store.js    ← createStore(themeState)
+          hooks.js    ← useThemeStore
+    ```
+  </Step>
+  <Step title="Single stores/ index file (recommended for medium apps)">
+    Export everything from a single `src/store/store.js` and `src/store/hooks.js` as shown in the source repo. Simple to navigate, easy to refactor.
+  </Step>
+  <Step title="Co-locate with the component (small / private state)">
+    If a store belongs to exactly one component and will never be shared, define it at the top of that component's file — above the component function. `CountComponent` uses this pattern.
+  </Step>
+</Steps>

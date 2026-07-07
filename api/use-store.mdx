@@ -1,0 +1,195 @@
+---
+title: "useStore — Subscribe to NexusStore in React"
+sidebarTitle: "useStore"
+description: "useStore(storeRef, selector?) reads NexusStore state in React. Built on useSyncExternalStore for concurrent-mode safety and fine-grained subscriptions."
+---
+
+`useStore` is the React hook that connects a component to a NexusStore store. Call it with a store reference and an optional selector function; it returns the selected slice of state and automatically re-renders the component whenever that slice changes. Under the hood it delegates to React's `useSyncExternalStore`, which means subscriptions are safe under React 18's concurrent rendering — no state tearing, no extra batching logic required.
+
+## Signature
+
+```ts
+useStore(storeRef: Store, selector?: (state: State) => T): T | State
+```
+
+## Parameters
+
+<ParamField path="storeRef" type="Store" required>
+  The store object returned by `createStore` (or `immer(createStore(...))`). This is the live store your component will subscribe to. Pass the module-level store constant — never create the store inside the component.
+</ParamField>
+
+<ParamField path="selector" type="(state: State) => T" optional>
+  A function that receives the full state object and returns the slice you want to subscribe to. When provided, the component only re-renders when the return value of this function changes (compared with `Object.is`). When omitted, `useStore` returns the full state object and re-renders on **any** change to the store.
+</ParamField>
+
+## Returns
+
+- **With a selector**: the value returned by `selector(state)` — can be any type (primitive, object, array).
+- **Without a selector**: the full state object as returned by `storeRef.getState()`.
+
+## Without a Selector
+
+When called with only a store reference, `useStore` returns the entire state object. The component re-renders any time any key in the store changes, regardless of which key the component actually uses.
+
+```jsx title="Subscribing to the full store"
+import { useStore } from "./NexusStore/useStore";
+import { store } from "./store/store";
+
+function FullStateDebugger() {
+  const state = useStore(store);
+
+  return <pre>{JSON.stringify(state, null, 2)}</pre>;
+}
+```
+
+<Note>
+  Subscribing without a selector is convenient for debugging or for small stores where every key is relevant to the component. For larger stores, prefer a selector to avoid unnecessary re-renders.
+</Note>
+
+## With a Selector
+
+Passing a selector limits re-renders to only the slice of state the component cares about. `useStore` uses `Object.is` to compare the previous and next selector output — if they are equal, the component is not re-rendered.
+
+```jsx title="CountComponent.jsx — selecting a primitive"
+import { useStore } from "../NexusStore/useStore";
+import { createStore } from "../NexusStore/core";
+
+const countStore = createStore({
+  count: 0,
+});
+
+export default function CountComponent() {
+  const countValue = useStore(countStore, (state) => state.count);
+
+  return (
+    <fieldset>
+      <legend>Count</legend>
+      <p>{countValue}</p>
+      <button
+        onClick={() =>
+          countStore.setState(
+            (keys) => keys.count,
+            (curr) => curr + 1,
+          )
+        }
+      >
+        Increment
+      </button>
+      <button
+        onClick={() =>
+          countStore.setState(
+            (keys) => keys.count,
+            (curr) => Math.max(0, curr - 1),
+          )
+        }
+      >
+        Decrement
+      </button>
+    </fieldset>
+  );
+}
+```
+
+## Stabilizing Selectors with useCallback
+
+When you write an inline arrow function as the selector, React creates a new function reference on every render. `useStore` depends on `selector` as a `useCallback` dependency — a new reference causes `getSnapshot` to be recreated, which can trigger an extra render cycle. Stabilize the selector with `useCallback`, or define it as a module-level constant.
+
+```jsx title="CartComponent.jsx — stable selector with useCallback"
+import { useCallback } from "react";
+import { useSelector } from "../store/hooks";
+import { store } from "../store/store";
+
+export default function CartComponent() {
+  // Stable selector: does not change between renders
+  const cartItems = useSelector(useCallback((state) => state.cart.items, []));
+
+  function handlePushItem() {
+    store.setState(
+      (keys) => keys.cart,
+      (draft) => {
+        draft.items.push("Kiwi");
+      },
+    );
+  }
+
+  function handleRemoveItem() {
+    store.setState(
+      (keys) => keys.cart,
+      (draft) => {
+        draft.items.pop();
+      },
+    );
+  }
+
+  return (
+    <fieldset>
+      <legend>Cart</legend>
+      <ul>
+        {cartItems.map((cartItem) => (
+          <li key={cartItem}>{cartItem}</li>
+        ))}
+      </ul>
+      <button onClick={handlePushItem}>Push Item</button>
+      <button onClick={handleRemoveItem}>Remove Item</button>
+    </fieldset>
+  );
+}
+```
+
+<Tip>
+  Alternatively, extract the selector to a module-level constant (e.g. `const cartItemsSelector = (state) => state.cart.items`) so it is never recreated. This also makes selectors reusable across multiple components.
+</Tip>
+
+## Error — Invalid Selector Type
+
+If `selector` is provided but is not a function, `useStore` throws immediately with a descriptive error:
+
+```
+[Store Error]: Invalid selector type.
+
+Expected: "function"
+Received: "<actual typeof value>"
+
+Usage Examples:
+- Specific state: useStore(store, (state) => state.value)
+- Complete store: useStore(store)
+```
+
+This protects against accidentally passing a derived value (e.g. `useStore(store, state.count)`) instead of a selector function.
+
+## Under the Hood
+
+`useStore` is implemented in fewer than 20 lines. It wraps `useSyncExternalStore` from React:
+
+```js title="useStore.js"
+import { useCallback, useSyncExternalStore } from "react";
+
+export function useStore(storeRef, selector) {
+  if (selector !== undefined && typeof selector !== "function") {
+    throw new Error(
+      `[Store Error]: Invalid selector type.\n\n` +
+        `Expected: "function"\n` +
+        `Received: "${typeof selector}"\n\n` +
+        `Usage Examples:\n` +
+        `- Specific state: useStore(store, (state) => state.value)\n` +
+        `- Complete store: useStore(store)`,
+    );
+  }
+
+  const getSnapshot = useCallback(() => {
+    const fullState = storeRef.getState();
+    return selector ? selector(fullState) : fullState;
+  }, [storeRef, selector]);
+
+  return useSyncExternalStore(storeRef.subscribe, getSnapshot);
+}
+```
+
+`useSyncExternalStore` guarantees that:
+- The snapshot read during render is always consistent with what the subscription sees.
+- Concurrent features like `useTransition` and `Suspense` do not cause stale or torn reads.
+- Server-side rendering is supported (though you should provide a `getServerSnapshot` if you need SSR hydration).
+
+<Tip>
+  For large stores with many top-level keys, always pass a selector so your component only re-renders when its specific data changes. See [Selector Optimization](/advanced/selector-optimization) for patterns like memoized selectors and derived state.
+</Tip>

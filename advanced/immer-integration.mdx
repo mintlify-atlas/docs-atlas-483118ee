@@ -1,0 +1,215 @@
+---
+title: "Using Immer with NexusStore for Nested State"
+sidebarTitle: "Immer Integration"
+description: "NexusStore's immer() wrapper enables mutation-style updates for nested objects and arrays without spread operators. Learn both integration patterns."
+---
+
+Working with deeply nested state in JavaScript normally means chaining spread operators on every level just to satisfy immutability requirements. [Immer](https://immerjs.github.io/immer/) eliminates that ceremony by letting you write direct mutations against a draft proxy — it then produces a new immutable state behind the scenes. NexusStore supports Immer through two distinct patterns: a per-call `produce` approach that requires no changes to your store, and an `immer()` store wrapper that makes every `setState` and `setMultiple` call automatically Immer-aware.
+
+## Installation
+
+Install Immer as a peer dependency before using either pattern.
+
+<CodeGroup>
+```bash npm
+npm install immer
+```
+
+```bash yarn
+yarn add immer
+```
+
+```bash pnpm
+pnpm add immer
+```
+</CodeGroup>
+
+## Why Immer?
+
+Without Immer, updating a nested object requires a full spread chain at every level to avoid mutating the existing state reference:
+
+```js title="Without Immer — spread chains get verbose fast"
+store.setState(
+  (keys) => keys.cart,
+  (currentCart) => ({
+    ...currentCart,
+    items: [...currentCart.items, "Kiwi"],
+  }),
+);
+```
+
+With Immer you write the mutation directly. Immer intercepts it on a draft proxy and hands NexusStore a fresh immutable copy:
+
+```js title="With Immer — direct mutation, same result"
+store.setState(
+  (keys) => keys.cart,
+  (draft) => {
+    draft.items.push("Kiwi");
+  },
+);
+```
+
+Both snippets produce identical state — the Immer version just reads the way you think about the update.
+
+## Two Integration Patterns
+
+<Tabs>
+  <Tab title="Per-call produce (no store wrapping)">
+    When you are working with a plain `createStore` store and only need Immer for a specific update, import `produce` directly from the `immer` package and wrap your updater function.
+
+    <Warning>
+      Do **not** pass a `baseState` as the first argument to `produce`. Calling `produce((draft) => { ... })` with only a recipe function returns a curried producer — NexusStore passes the current slice of state to it automatically. Providing a base state yourself will bypass NexusStore's state management.
+    </Warning>
+
+    The `AuthComponent` in the demo app uses this pattern. The store (`authStore`) is a plain `createStore` store with no Immer wrapping, so `produce` is imported at the component level and used inline:
+
+    ```jsx title="src/components/AuthComponent.jsx"
+    import { useAuthStore } from "../store/hooks";
+    import { authStore } from "../store/store";
+    import { produce } from "immer";
+
+    export default function AuthComponent() {
+      console.log("%c AuthComponent Rendered", "color: orange");
+      const auth = useAuthStore((state) => state.auth);
+
+      return (
+        <fieldset>
+          <legend>Auth</legend>
+          <p>{auth.isLoggedin ? "Logged In" : "Logged Out"}</p>
+          <button
+            onClick={() =>
+              authStore.setState(
+                (keys) => keys.auth,
+                produce((draft) => {
+                  draft.isLoggedin = !draft.isLoggedin;
+                }),
+              )
+            }
+          >
+            Toggle Auth
+          </button>
+        </fieldset>
+      );
+    }
+    ```
+
+    This approach works well for one-off updates. Its downside is that you must remember to import and wrap `produce` at every call site.
+  </Tab>
+
+  <Tab title="immer() store wrapper (recommended)">
+    The cleaner option is to wrap the store once at creation time using NexusStore's `immer()` helper. Every subsequent `setState` and `setMultiple` call that receives a function will automatically run it through Immer — no per-call imports needed.
+
+    ```js title="src/store/store.js"
+    import { createStore } from "../NexusStore/core";
+    import { immer } from "../NexusStore/immer";
+
+    const state = {
+      auth: {
+        isLoggedin: true,
+        token: "a1b2c3",
+      },
+      theme: {
+        mode: "dark",
+        color: "#000000",
+      },
+      cart: {
+        items: ["Mango", "Apple", "Banana"],
+        totalQuantity: 3,
+        totalPrice: 75,
+      },
+      settings: {
+        notificationsEnabled: true,
+        language: "en",
+        currency: "USD",
+      },
+    };
+
+    export const themeStore = createStore(themeState);
+    export const authStore = createStore(authState);
+    export const store = immer(createStore(state));
+    ```
+
+    With the Immer-wrapped `store`, `CartComponent` can mutate the `items` array directly in the updater function:
+
+    ```jsx title="src/components/CartComponent.jsx"
+    import { useCallback } from "react";
+    import { useSelector } from "../store/hooks";
+    import { store } from "../store/store";
+
+    export default function CartComponent() {
+      const cartItems = useSelector(useCallback((state) => state.cart.items, []));
+
+      function handlePushItem() {
+        store.setState(
+          (keys) => keys.cart,
+          (draft) => {
+            draft.items.push("Kiwi");
+          },
+        );
+      }
+
+      function handleRemoveItem() {
+        store.setState(
+          (keys) => keys.cart,
+          (draft) => {
+            draft.items.pop();
+          },
+        );
+      }
+
+      return (
+        <fieldset>
+          <legend>Cart</legend>
+          <ul>
+            {cartItems.map((cartItem) => (
+              <li key={cartItem}>{cartItem}</li>
+            ))}
+          </ul>
+          <button onClick={handlePushItem}>Push Item</button>
+          <button onClick={handleRemoveItem}>Remove Item</button>
+        </fieldset>
+      );
+    }
+    ```
+
+    **Compatibility with direct values:** wrapping a store with `immer()` does not break plain value updates. Immer is only invoked when the second argument to `setState` (or the argument to `setMultiple`) is a function. Direct value assignments continue to work exactly as before:
+
+    ```js title="Direct value still works on an immer-wrapped store"
+    // This works fine — no Immer involvement
+    themeStore.setState((keys) => keys.theme, "dark");
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  `immer()` is a store factory wrapper — call it once when you create the store, not inside a React component or event handler. Calling it per render would create a new store object on every render cycle and discard all stored state.
+</Warning>
+
+## Spread Operators vs. Immer Draft — Side-by-Side
+
+The table below shows the same operations written both ways so you can see the readability gains at a glance.
+
+| Operation | Without Immer | With Immer |
+|---|---|---|
+| Push to array | `[...curr.items, "Kiwi"]` | `draft.items.push("Kiwi")` |
+| Pop from array | `curr.items.slice(0, -1)` | `draft.items.pop()` |
+| Toggle nested boolean | `{ ...curr, isLoggedin: !curr.isLoggedin }` | `draft.isLoggedin = !draft.isLoggedin` |
+| Update nested string | `{ ...curr, mode: "light" }` | `draft.mode = "light"` |
+
+## Debugging Draft Values
+
+Logging an Immer draft proxy directly produces an unreadable Proxy object in the console. Import `current` from `immer` to get a plain snapshot of the draft at that moment:
+
+```js title="Debugging a draft with current()"
+import { current } from "immer";
+
+store.setMultiple((draft) => {
+  console.log(current(draft)); // plain JS object — readable in DevTools
+  draft.auth.isLoggedin = false;
+  draft.theme.mode = "light";
+});
+```
+
+<Tip>
+  `current(draft)` is a zero-cost debug helper — it has no effect on the resulting state update. Remove it before shipping to production.
+</Tip>

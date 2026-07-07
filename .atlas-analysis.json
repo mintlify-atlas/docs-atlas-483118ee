@@ -1,0 +1,76 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "NexusStore",
+  "projectDescription": "A lightweight, performance-optimized custom state management library for React applications, built around createStore, the useStore hook, and optional Immer integration for immutable nested state updates.",
+  "theme": "luma",
+  "primaryColor": "#8727fc",
+  "lightColor": "#8c51fc",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/creating-stores",
+              "concepts/subscribing-with-usestore",
+              "concepts/updating-state",
+              "concepts/multiple-stores"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/immer-integration",
+              "advanced/batch-updates",
+              "advanced/selector-optimization",
+              "advanced/custom-hooks"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "API",
+            "pages": [
+              "api/create-store",
+              "api/use-store",
+              "api/set-state",
+              "api/set-multiple",
+              "api/immer"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Zero-dependency core — no Redux, Zustand, or Context API required",
+    "Fine-grained selector subscriptions to eliminate unnecessary re-renders",
+    "Batch updates via setMultiple for atomic multi-key state changes",
+    "Optional Immer integration for mutation-style nested state updates",
+    "Custom hook pattern for clean, scalable multi-store architectures",
+    "Built on React's useSyncExternalStore for concurrent-mode safety"
+  ],
+  "publicApiSurface": [
+    "createStore(initialState) → Store",
+    "store.getState() → State",
+    "store.subscribe(listener) → unsubscribe",
+    "store.setState(selectKeyFn, nextStateOrFn)",
+    "store.setMultiple(nextStateOrFn, replaceStore?)",
+    "useStore(storeRef, selector?) → SelectedState",
+    "immer(storeRef) → ImmerWrappedStore"
+  ]
+}

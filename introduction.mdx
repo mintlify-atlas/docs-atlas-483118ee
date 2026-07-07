@@ -1,0 +1,75 @@
+---
+title: "NexusStore: React State Management Without the Overhead"
+sidebarTitle: "Introduction"
+description: "NexusStore is a minimal React state management library. It provides createStore, useStore, and optional Immer integration for fast, scalable state."
+---
+
+NexusStore is a lightweight state management solution built specifically for React. It keeps stores entirely outside your component tree, wires them into components through a single hook, and lets you update state imperatively — all without the boilerplate of Redux or the performance pitfalls of deeply nested Context providers.
+
+## Why NexusStore?
+
+Most React state management tools force a trade-off: either you adopt a large framework with significant boilerplate (Redux, Zustand with middleware), or you lean on React Context and accept re-renders whenever anything in the context tree changes. NexusStore was built to avoid both problems.
+
+Under the hood, `useStore` uses React 18's `useSyncExternalStore` hook, which means subscriptions are concurrent-mode safe without any extra configuration. Stores live as plain JavaScript objects outside the React tree, so React never needs to re-render a component unless the specific slice of state it subscribes to has actually changed.
+
+## The Three Core Exports
+
+NexusStore ships as three source files that you copy directly into your project. Each file has a single responsibility:
+
+- **`createStore`** (`NexusStore/core.js`) — Creates a store from an initial state object. Returns `getState`, `subscribe`, `setState`, and `setMultiple`. Stores are plain objects that live outside any component.
+
+- **`useStore`** (`NexusStore/useStore.js`) — A React hook that subscribes a component to a store. Accepts an optional selector function to subscribe only to a specific slice, preventing unnecessary re-renders when unrelated state changes.
+
+- **`immer`** (`NexusStore/immer.js`) — An optional wrapper around any store that enables Immer-powered mutations. Wrap your store with `immer(createStore(...))` and write mutating draft functions instead of spreading nested objects by hand.
+
+## Architecture Overview
+
+NexusStore follows a straightforward unidirectional data flow:
+
+```text
+createStore(initialState)
+       │
+       ▼
+  Store object  ──────────────────────────────────────────┐
+  (getState, subscribe,                                   │
+   setState, setMultiple)                                 │
+       │                                             imperative
+       │ storeRef.subscribe                           updates
+       ▼                                                  │
+  useStore(storeRef, selector)  ◄──────────────  Event handler
+       │                                         or action fn
+       ▼
+  React component
+  (re-renders only when
+   selected slice changes)
+```
+
+Stores are created once at module scope and shared by importing the store reference wherever it is needed — no providers, no context, no wrappers around your app.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Fine-Grained Subscriptions" icon="crosshairs">
+    Pass a selector to `useStore` and the component re-renders only when that specific slice of state changes. Unrelated updates to the same store are ignored.
+  </Card>
+  <Card title="Immer Integration" icon="pen-to-square">
+    Wrap any store with `immer()` to enable draft-style mutations on nested objects and arrays — no manual spreading required.
+  </Card>
+  <Card title="Batch Updates with setMultiple" icon="layer-group">
+    Update several keys in one store at once with `setMultiple`. All subscribers are notified in a single update cycle, avoiding multiple re-renders.
+  </Card>
+  <Card title="Custom Hooks Pattern" icon="puzzle-piece">
+    Encapsulate each store behind its own custom hook (e.g., `useThemeStore`, `useAuthStore`) so components never import store references directly.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build a working counter in five minutes. See `createStore`, `useStore`, and `setState` in action with real code.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Copy the three source files into your project and optionally install Immer for nested state updates.
+  </Card>
+</CardGroup>

@@ -1,0 +1,237 @@
+---
+title: "Building Custom Hooks per Store Domain"
+sidebarTitle: "Custom Hooks"
+description: "Wrap useStore in domain-specific custom hooks to eliminate repetitive imports and provide a clean, discoverable API for each state domain."
+---
+
+Every component that subscribes to a NexusStore store must import two things: the `useStore` hook and the store reference itself. In a small app that is manageable, but once you have a dozen components all reaching into `authStore` or `themeStore`, those repeated imports become noisy boilerplate. Custom hooks solve this by centralising the pairing of `useStore` + store in one place — components then import a single, clearly-named hook like `useAuthStore` and pass only their selector.
+
+## The Pattern in the Source
+
+The demo app's `src/store/hooks.js` shows the full pattern:
+
+```js title="src/store/hooks.js"
+import { useStore } from "../NexusStore/useStore";
+import { authStore, themeStore, store } from "./store";
+
+export function useThemeStore(selector) {
+  return useStore(themeStore, selector);
+}
+
+export function useAuthStore(selector) {
+  return useStore(authStore, selector);
+}
+
+export function useSelector(selector) {
+  return useStore(store, selector);
+}
+```
+
+Each hook is a thin wrapper — it accepts a `selector` and forwards it straight to `useStore` alongside the bound store reference. The full `useStore` API is preserved: selectors work exactly as documented, stability recommendations still apply, and the return value is whatever the selector returns.
+
+## Using Custom Hooks in Components
+
+Components import only the domain hook. There is no need to know which store backs the hook or where the store file lives.
+
+```jsx title="src/components/ThemeComponent.jsx"
+import { useThemeStore } from "../store/hooks";
+import { themeStore } from "../store/store";
+
+export default function ThemeComponent() {
+  console.log("%c ThemeComponent Rendered", "color: cyan");
+  const theme = useThemeStore((state) => state.theme);
+
+  return (
+    <fieldset>
+      <legend>Theme</legend>
+      <p>Current Theme: {theme}</p>
+      <button
+        onClick={() =>
+          themeStore.setState(
+            (keys) => keys.theme,
+            theme === "light" ? "dark" : "light",
+          )
+        }
+      >
+        Toggle Theme
+      </button>
+    </fieldset>
+  );
+}
+```
+
+```jsx title="src/components/AuthComponent.jsx"
+import { useAuthStore } from "../store/hooks";
+import { authStore } from "../store/store";
+import { produce } from "immer";
+
+export default function AuthComponent() {
+  console.log("%c AuthComponent Rendered", "color: orange");
+  const auth = useAuthStore((state) => state.auth);
+
+  return (
+    <fieldset>
+      <legend>Auth</legend>
+      <p>{auth.isLoggedin ? "Logged In" : "Logged Out"}</p>
+      <button
+        onClick={() =>
+          authStore.setState(
+            (keys) => keys.auth,
+            produce((draft) => {
+              draft.isLoggedin = !draft.isLoggedin;
+            }),
+          )
+        }
+      >
+        Toggle Auth
+      </button>
+    </fieldset>
+  );
+}
+```
+
+`ThemeComponent` imports `useThemeStore` — it has no knowledge of `themeStore` being the backing store, or of `useStore` existing at all. If you later split `themeStore` into two stores or rename the store file, only `hooks.js` needs to change.
+
+## Creating a Custom Hook from Scratch
+
+<Steps>
+  <Step title="Create your store in store.js">
+    Define your initial state and export the store. Wrap with `immer()` if you need mutation-style updates.
+
+    ```js title="src/store/store.js"
+    import { createStore } from "../NexusStore/core";
+    import { immer } from "../NexusStore/immer";
+
+    const cartState = {
+      cart: {
+        items: [],
+        totalQuantity: 0,
+        totalPrice: 0,
+      },
+    };
+
+    export const cartStore = immer(createStore(cartState));
+    ```
+  </Step>
+
+  <Step title="Create hooks.js in the same folder">
+    Co-locate the hooks file next to the store so both live under `src/store/`. This makes the domain boundary obvious at a glance.
+
+    ```
+    src/
+    └── store/
+        ├── store.js   ← store definitions
+        └── hooks.js   ← custom hooks (and optionally action helpers)
+    ```
+  </Step>
+
+  <Step title="Export a named hook that wraps useStore">
+    Import `useStore` and the store reference, then re-export a function that accepts a selector and calls `useStore` with both.
+
+    ```js title="src/store/hooks.js"
+    import { useStore } from "../NexusStore/useStore";
+    import { cartStore, authStore, themeStore, store } from "./store";
+
+    export function useCartStore(selector) {
+      return useStore(cartStore, selector);
+    }
+
+    export function useThemeStore(selector) {
+      return useStore(themeStore, selector);
+    }
+
+    export function useAuthStore(selector) {
+      return useStore(authStore, selector);
+    }
+
+    export function useSelector(selector) {
+      return useStore(store, selector);
+    }
+    ```
+  </Step>
+
+  <Step title="Use it in components">
+    Components import the domain hook and pass their selector. That is the only import they need.
+
+    ```jsx title="src/components/CartComponent.jsx"
+    import { useCallback } from "react";
+    import { useCartStore } from "../store/hooks";
+    import { cartStore } from "../store/store";
+
+    export default function CartComponent() {
+      const items = useCartStore(useCallback((state) => state.cart.items, []));
+
+      function handleAddItem(name) {
+        cartStore.setState(
+          (keys) => keys.cart,
+          (draft) => {
+            draft.items.push(name);
+            draft.totalQuantity += 1;
+          },
+        );
+      }
+
+      return (
+        <ul>
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      );
+    }
+    ```
+  </Step>
+</Steps>
+
+## Exporting Action Helpers from the Same File
+
+Custom hooks are not limited to read access. You can export named action functions from the same `hooks.js` file, keeping all store interaction — reads and writes — in a single module.
+
+```js title="src/store/hooks.js — actions alongside hooks"
+import { useStore } from "../NexusStore/useStore";
+import { themeStore } from "./store";
+
+export function useThemeStore(selector) {
+  return useStore(themeStore, selector);
+}
+
+// Action helper — no hook needed, just call it from an event handler
+export function toggleTheme() {
+  themeStore.setState(
+    (keys) => keys.theme,
+    (t) => (t === "light" ? "dark" : "light"),
+  );
+}
+```
+
+Components then import both the hook and the action from one place:
+
+```jsx title="Using a hook and action from the same module"
+import { useThemeStore, toggleTheme } from "../store/hooks";
+
+export default function ThemeToggle() {
+  const theme = useThemeStore((state) => state.theme);
+  return <button onClick={toggleTheme}>Current: {theme}</button>;
+}
+```
+
+<Note>
+  Action helpers exported from `hooks.js` are plain functions, not hooks — they can be called anywhere: event handlers, async functions, or other utilities. They do not need to follow the Rules of Hooks.
+</Note>
+
+## Benefits at a Glance
+
+<CardGroup cols={2}>
+  <Card title="Single import per domain" icon="arrow-down-to-line">
+    Components import one hook instead of both `useStore` and the store reference. Less noise, fewer accidental imports of the wrong store.
+  </Card>
+  <Card title="Easy to refactor" icon="arrows-rotate">
+    Renaming, splitting, or merging stores only touches `store.js` and `hooks.js`. Component files do not need to change.
+  </Card>
+  <Card title="Discoverable API" icon="magnifying-glass">
+    `useAuthStore`, `useCartStore`, `useThemeStore` — the hook name tells you exactly what domain it belongs to without reading the implementation.
+  </Card>
+  <Card title="Co-located actions" icon="bolt">
+    Exporting action helpers from `hooks.js` keeps all store interaction in one file, making the module the single source of truth for a domain.
+  </Card>
+</CardGroup>

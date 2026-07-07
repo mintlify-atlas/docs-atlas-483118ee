@@ -1,0 +1,260 @@
+---
+title: "Installing NexusStore in Your React Project"
+sidebarTitle: "Installation"
+description: "NexusStore ships as source files. Copy the three core files into your project and optionally install Immer for nested state updates."
+---
+
+NexusStore does not have an npm package. Instead, it ships as three small JavaScript source files that you copy directly into your project. This keeps the library dependency-free for the core features and gives you full visibility into exactly what code is running in your app.
+
+## Requirements
+
+- **React 18 or later** — `useStore` is built on `useSyncExternalStore`, which is only available in React 18+. This hook makes all store subscriptions safe for React's concurrent rendering mode without any extra configuration.
+
+<Note>
+  If you want to use the `immer()` wrapper for mutating nested objects and
+  arrays, you must also install the `immer` package (see below). The core
+  `createStore` and `useStore` files have no external dependencies at all.
+</Note>
+
+## Step 1: Copy the source files
+
+Create a `NexusStore/` directory inside your `src/` folder and add the following three files.
+
+### `core.js`
+
+```js title="src/NexusStore/core.js"
+export function createStore(initialStoreState) {
+    let state = initialStoreState;
+    const listeners = new Set();
+
+    const keys = {};
+    for (const key in initialStoreState) {
+        keys[key] = key;
+    }
+
+    return {
+        getState: () => state,
+        subscribe: (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+        setState: (selectKeyFn, nextStateOrFn) => {
+            if (typeof selectKeyFn !== "function") {
+                console.error(
+                    `[Store Error]: The first argument must be a selector function. Usage: setState((keys) => keys.username, nextValue)`,
+                );
+                return;
+            }
+
+            const key = selectKeyFn(keys);
+
+            if (!key || !keys[key]) {
+                console.error(
+                    `[Store Error]: Selected key "${key}" is invalid or does not exist in the initial state.`,
+                );
+                return;
+            }
+
+            const currentState = state[key];
+            const nextState =
+                typeof nextStateOrFn === "function"
+                    ? nextStateOrFn(currentState)
+                    : nextStateOrFn;
+
+            if (!Object.is(currentState, nextState)) {
+                state = {
+                    ...state,
+                    [key]: nextState,
+                };
+                listeners.forEach((listener) => listener());
+            }
+        },
+        setMultiple: (nextStateOrFn, replaceStore = false) => {
+            const nextState =
+                typeof nextStateOrFn === "function"
+                    ? nextStateOrFn(state)
+                    : nextStateOrFn;
+
+            if (
+                typeof nextState !== "object" ||
+                nextState === null ||
+                Array.isArray(nextState)
+            ) {
+                console.error(
+                    "[Store Error]: State update failed. Expected an object or a function returning an object. Please check your setMultiple arguments.",
+                );
+                return;
+            }
+
+            if (!Object.is(state, nextState)) {
+                state = replaceStore ? nextState : { ...state, ...nextState };
+                listeners.forEach((listener) => listener());
+            }
+        },
+    };
+}
+```
+
+### `useStore.js`
+
+```js title="src/NexusStore/useStore.js"
+import { useCallback, useSyncExternalStore } from "react";
+
+export function useStore(storeRef, selector) {
+    if (selector !== undefined && typeof selector !== "function") {
+        throw new Error(
+            `[Store Error]: Invalid selector type.\n\n` +
+                `Expected: "function"\n` +
+                `Received: "${typeof selector}"\n\n` +
+                `Usage Examples:\n` +
+                `- Specific state: useStore(store, (state) => state.value)\n` +
+                `- Complete store: useStore(store)`,
+        );
+    }
+
+    const getSnapshot = useCallback(() => {
+        const fullState = storeRef.getState();
+        return selector ? selector(fullState) : fullState;
+    }, [storeRef, selector]);
+
+    return useSyncExternalStore(storeRef.subscribe, getSnapshot);
+}
+```
+
+### `immer.js`
+
+```js title="src/NexusStore/immer.js"
+import { produce } from "immer";
+
+export function immer(storeRef) {
+    return {
+        ...storeRef,
+        setState: (selectKeyFn, nextStateOrFn) => {
+            const nextState =
+                typeof nextStateOrFn === "function"
+                    ? produce(nextStateOrFn)
+                    : nextStateOrFn;
+
+            storeRef.setState(selectKeyFn, nextState);
+        },
+        setMultiple: (nextStateOrFn, replaceStore = false) => {
+            const nextState =
+                typeof nextStateOrFn === "function"
+                    ? produce(nextStateOrFn)
+                    : nextStateOrFn;
+
+            storeRef.setMultiple(nextState, replaceStore);
+        },
+    };
+}
+```
+
+<Note>
+  `immer.js` imports `produce` from the `immer` package. This file is only
+  needed if you plan to use the `immer()` store wrapper. If you are not using
+  Immer, you can skip copying this file entirely.
+</Note>
+
+## Step 2: Recommended project structure
+
+Once you have copied the NexusStore files, the recommended way to organise your stores and hooks is:
+
+```text
+src/
+  NexusStore/
+    core.js
+    useStore.js
+    immer.js
+  store/
+    store.js      ← createStore calls live here
+    hooks.js      ← custom useXxxStore hooks live here
+```
+
+Here is what a typical `store.js` and `hooks.js` pair looks like, taken from the NexusStore reference project:
+
+```js title="src/store/store.js"
+import { createStore } from "../NexusStore/core";
+import { immer } from "../NexusStore/immer";
+
+const authState = {
+    auth: {
+        isLoggedin: false,
+    },
+};
+
+const themeState = {
+    theme: "light",
+};
+
+export const authStore = createStore(authState);
+export const themeStore = createStore(themeState);
+
+// Wrap with immer() for stores that need nested mutation support
+const state = {
+    auth: {
+        isLoggedin: true,
+        token: "a1b2c3",
+    },
+    theme: {
+        mode: "dark",
+        color: "#000000",
+    },
+    cart: {
+        items: ["Mango", "Apple", "Banana"],
+        totalQuantity: 3,
+        totalPrice: 75,
+    },
+    settings: {
+        notificationsEnabled: true,
+        language: "en",
+        currency: "USD",
+    },
+};
+
+export const store = immer(createStore(state));
+```
+
+```js title="src/store/hooks.js"
+import { useStore } from "../NexusStore/useStore";
+import { authStore, themeStore, store } from "./store";
+
+export function useThemeStore(selector) {
+    return useStore(themeStore, selector);
+}
+
+export function useAuthStore(selector) {
+    return useStore(authStore, selector);
+}
+
+export function useSelector(selector) {
+    return useStore(store, selector);
+}
+```
+
+This pattern keeps store references out of individual components. Components only ever import the lightweight custom hooks.
+
+## Step 3: Install Immer (optional)
+
+If you plan to use the `immer()` wrapper for nested state mutations, install the `immer` package:
+
+<CodeGroup>
+
+```bash npm
+npm install immer
+```
+
+```bash yarn
+yarn add immer
+```
+
+```bash pnpm
+pnpm add immer
+```
+
+</CodeGroup>
+
+The `immer` package is the only optional external dependency. After installing it, `immer.js` will resolve its import automatically and you can wrap any store with `immer(createStore(initialState))`.
+
+## Verification
+
+To confirm everything is wired up correctly, add the counter from the [Quickstart](/quickstart) to any page in your app. Open your browser console and you should see `CountComponent Rendered` printed in green on the first mount — and again only when the count value actually changes after clicking Increment or Decrement.

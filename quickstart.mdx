@@ -1,47 +1,158 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with NexusStore in 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Build a working counter component with NexusStore in five minutes. Learn createStore, useStore, and setState with a real working example."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This guide walks you through building a fully working counter component from scratch using NexusStore. By the end you will have created a store, subscribed a component to it with a selector, and wired up increment and decrement buttons — all in under five minutes.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+### Copy the NexusStore source files into your project
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+NexusStore ships as source files rather than an npm package. Create a `NexusStore/` folder inside your `src/` directory and copy the three core files into it.
 
-    ```bash
-    your-cli start
-    ```
-  </Step>
-</Steps>
+```text
+src/
+  NexusStore/
+    core.js
+    useStore.js
+    immer.js      ← optional, only needed for Immer integration
+```
+
+No `npm install` is required for the core library. If you plan to use the `immer()` wrapper, install Immer separately:
+
+```bash
+npm install immer
+```
+
+See the [Installation guide](/installation) for the full file contents and a recommended project structure.
+
+### Create a store outside the component
+
+Import `createStore` from `NexusStore/core` and call it with your initial state object. The call must happen at **module scope** — outside any component function — so the store is created only once and persists for the lifetime of the application.
+
+```js title="src/components/CountComponent.jsx"
+import { createStore } from "../NexusStore/core";
+
+const countStore = createStore({
+    count: 0,
+});
+```
+
+`createStore` returns an object with four methods: `getState`, `subscribe`, `setState`, and `setMultiple`. You will use `setState` to update state and pass the store reference to `useStore` inside the component.
 
 <Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+  Always declare stores outside component functions. If `createStore` is called
+  inside a component, React creates a brand-new store on every render, wiping
+  out all existing state. Module scope is the right place — or a dedicated
+  `store.js` file if the store is shared across multiple components.
 </Tip>
+
+### Subscribe with `useStore` and a selector
+
+Import `useStore` from `NexusStore/useStore`. Call it inside your component with two arguments: the store reference and a **selector function** that picks out the specific slice of state the component needs.
+
+```jsx title="src/components/CountComponent.jsx"
+import { useStore } from "../NexusStore/useStore";
+import { createStore } from "../NexusStore/core";
+
+const countStore = createStore({
+    count: 0,
+});
+
+export default function CountComponent() {
+    const countValue = useStore(countStore, (state) => state.count);
+
+    return <p>{countValue}</p>;
+}
+```
+
+Because the selector returns only `state.count`, this component re-renders exclusively when `count` changes. Any other key added to `countStore` later will never trigger an unnecessary re-render here.
+
+### Update state with `setState`
+
+Call `setState` directly on the store reference — no dispatch, no action creators. The method takes two arguments:
+
+1. **A key-selector function** — receives the store's top-level keys as an object and returns the key string you want to update: `(keys) => keys.count`.
+2. **A new value or updater function** — either a direct value (`10`) or a function that receives the current value and returns the next one: `(curr) => curr + 1`.
+
+```jsx title="src/components/CountComponent.jsx"
+// Increment
+countStore.setState(
+    (keys) => keys.count,
+    (curr) => curr + 1,
+);
+
+// Decrement — floor at 0
+countStore.setState(
+    (keys) => keys.count,
+    (curr) => Math.max(0, curr - 1),
+);
+```
+
+NexusStore uses `Object.is` to compare the current and next values. If they are identical, no listeners are notified and no re-render is triggered.
+
+### Putting it all together
+
+Here is the complete `CountComponent.jsx` taken directly from the NexusStore source:
+
+```jsx title="src/components/CountComponent.jsx"
+import { useStore } from "../NexusStore/useStore";
+import { createStore } from "../NexusStore/core";
+
+const countStore = createStore({
+    count: 0,
+});
+
+export default function CountComponent() {
+    console.log("%c CountComponent Rendered", "color: green");
+    const countValue = useStore(countStore, (state) => state.count);
+
+    return (
+        <fieldset>
+            <legend>Count</legend>
+            <p>{countValue}</p>
+            <div
+                style={{
+                    display: "flex",
+                    gap: "0.25rem",
+                }}
+            >
+                <button
+                    onClick={() =>
+                        countStore.setState(
+                            (keys) => keys.count,
+                            (curr) => curr + 1,
+                        )
+                    }
+                >
+                    Increment
+                </button>
+                <button
+                    onClick={() =>
+                        countStore.setState(
+                            (keys) => keys.count,
+                            (curr) => Math.max(0, curr - 1),
+                        )
+                    }
+                >
+                    Decrement
+                </button>
+            </div>
+        </fieldset>
+    );
+}
+```
+
+Drop `<CountComponent />` anywhere in your app and it works immediately. The store is self-contained in the same file, which is fine for component-local state. For state shared across multiple components, move the `createStore` call to a dedicated `store.js` file and import the reference wherever it is needed.
+
+</Steps>
+
+## What's next?
+
+Now that you have a working counter, explore the patterns that make NexusStore scale:
+
+- **Multiple stores and custom hooks** — Create separate stores for auth, theme, and cart, then wrap each in a custom hook (`useAuthStore`, `useThemeStore`) so components never import store references directly.
+- **`setMultiple` for batch updates** — Update several keys in one store atomically to avoid multiple re-renders.
+- **Immer integration** — Wrap a store with `immer()` to write clean, mutating draft functions for nested objects and arrays.

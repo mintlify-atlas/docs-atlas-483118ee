@@ -1,0 +1,204 @@
+---
+title: "Creating Stores with createStore"
+sidebarTitle: "Creating Stores"
+description: "Learn how to create and structure NexusStore stores using createStore. Covers initial state, the returned store object, and where to define stores."
+---
+
+Every piece of shared state in NexusStore starts with a call to `createStore`. You hand it a plain JavaScript object describing your initial state, and it returns a store object with everything you need to read, update, and subscribe to that state — no classes, no decorators, no boilerplate.
+
+## The `createStore` function
+
+`createStore` accepts a single argument: a plain JavaScript object that becomes the initial state of the store. It returns a store object that exposes four methods.
+
+```js title="Full return shape of createStore"
+import { createStore } from "nexus-store";
+
+const countStore = createStore({ count: 0 });
+
+// countStore exposes:
+// {
+//   getState    — returns the current state snapshot
+//   subscribe   — registers a listener; returns an unsubscribe function
+//   setState    — updates a single top-level key
+//   setMultiple — updates several keys (or replaces the store) at once
+// }
+```
+
+Here is the complete contract for each method:
+
+| Method | Signature | Description |
+|---|---|---|
+| `getState` | `() => state` | Returns the current state object. |
+| `subscribe` | `(listener: () => void) => () => void` | Adds a listener that fires on every state change. Returns a cleanup function. |
+| `setState` | `(selectKeyFn, nextStateOrFn)` | Updates a single top-level key. See [Updating State](/concepts/updating-state). |
+| `setMultiple` | `(nextStateOrFn, replaceStore?)` | Merges (or replaces) multiple keys in one call. |
+
+## Creating your first store
+
+The simplest possible store holds a single counter value:
+
+```js title="countStore.js"
+import { createStore } from "nexus-store";
+
+const countStore = createStore({
+  count: 0,
+});
+```
+
+That one call gives you a fully functional, reactive store.
+
+## How NexusStore builds the keys object
+
+When you call `createStore`, NexusStore internally builds a `keys` mirror of your initial state object. Each key in the initial state becomes a matching string property on `keys`:
+
+```js title="Internal keys object (built from initial state)"
+// Given this initial state:
+const countStore = createStore({ count: 0 });
+
+// NexusStore creates this keys object internally:
+// { count: 'count' }
+```
+
+This `keys` object is passed to the selector function you provide to `setState`, giving you a type-safe way to reference state keys without hardcoding strings:
+
+```js title="Using keys in setState"
+// ✅ Use the keys object — safe and refactor-friendly
+countStore.setState((keys) => keys.count, 10);
+
+// ❌ Avoid hardcoded strings — fragile and error-prone
+countStore.setState(() => "count", 10);
+```
+
+<Note>
+  The `keys` object is an internal implementation detail. You interact with it only through the selector function you pass to `setState` — NexusStore handles the rest.
+</Note>
+
+## Declaring stores outside components
+
+<Warning>
+  Always declare stores **outside** React component functions. Placing a `createStore` call inside a component body means a brand-new store is created on every render, destroying all accumulated state and breaking subscriptions.
+</Warning>
+
+React re-renders components frequently — on prop changes, context updates, parent re-renders, and more. Any variable declared inside a component is re-created on each of those cycles.
+
+```jsx title="❌ Wrong — store is recreated on every render"
+export default function CountComponent() {
+  // 🚫 A new store (with count: 0) is created on EVERY render.
+  // Subscribers are lost. State never persists.
+  const countStore = createStore({ count: 0 });
+
+  const count = useStore(countStore, (state) => state.count);
+  // ...
+}
+```
+
+```jsx title="✅ Correct — store lives outside the component"
+import { createStore } from "nexus-store";
+import { useStore } from "nexus-store";
+
+// ✅ Created once, lives for the lifetime of the module.
+const countStore = createStore({ count: 0 });
+
+export default function CountComponent() {
+  const count = useStore(countStore, (state) => state.count);
+  // ...
+}
+```
+
+The `CountComponent` in the source repo follows exactly this pattern — the store is declared at module scope, above the component definition:
+
+```jsx title="src/components/CountComponent.jsx"
+import { useStore } from "../NexusStore/useStore";
+import { createStore } from "../NexusStore/core";
+
+const countStore = createStore({
+    count: 0,
+});
+
+export default function CountComponent() {
+    const countValue = useStore(countStore, (state) => state.count);
+    // ...
+}
+```
+
+## Using multiple stores
+
+As your application grows, you will naturally group related state into separate, focused stores. The `src/store/store.js` file in the source repo demonstrates this pattern clearly:
+
+```js title="src/store/store.js"
+import { createStore } from "../NexusStore/core";
+
+// Dedicated store for UI theme
+const themeState = {
+    theme: "light",
+};
+
+// Dedicated store for authentication
+const authState = {
+    auth: {
+        isLoggedin: false,
+    },
+};
+
+// A larger, combined store for complex domains
+const state = {
+    auth: {
+        isLoggedin: true,
+        token: "a1b2c3",
+    },
+    theme: {
+        mode: "dark",
+        color: "#000000",
+    },
+    cart: {
+        items: ["Mango", "Apple", "Banana"],
+        totalQuantity: 3,
+        totalPrice: 75,
+    },
+    settings: {
+        notificationsEnabled: true,
+        language: "en",
+        currency: "USD",
+    },
+};
+
+export const themeStore = createStore(themeState);
+export const authStore = createStore(authState);
+export const store = createStore(state);
+```
+
+Exporting each store from a dedicated `store.js` file keeps your state definitions central and easy to find from any component.
+
+## Where to define your stores
+
+There are two common patterns for organising store definitions:
+
+<CardGroup cols={2}>
+  <Card title="Dedicated store file" icon="folder-open">
+    Define all stores in a shared `src/store/store.js` (or `src/stores/`) file and export them. Best for stores used by multiple components or large applications.
+  </Card>
+  <Card title="Co-located with a component" icon="file-code">
+    Define the store at the top of the component's own file (above the component function). Best for stores that are genuinely private to a single component — like `countStore` in `CountComponent.jsx`.
+  </Card>
+</CardGroup>
+
+<Tip>
+  Prefer the dedicated file approach for any state that two or more components need to share. Co-location is a good fit when the store truly belongs to one component and will never be accessed elsewhere.
+</Tip>
+
+## TypeScript: annotating initial state
+
+NexusStore's source is plain JavaScript, but you can layer TypeScript types onto your stores for full type safety by typing the initial state object before passing it to `createStore`:
+
+```ts title="Typed store example"
+interface CountState {
+  count: number;
+}
+
+const initialState: CountState = { count: 0 };
+const countStore = createStore(initialState);
+
+// countStore.getState() is now inferred as CountState
+```
+
+Because `createStore` is generic-friendly, TypeScript will infer the state shape from the typed object you provide — no additional type parameters required.

@@ -1,0 +1,165 @@
+---
+title: "Atomic Batch Updates with setMultiple"
+sidebarTitle: "Batch Updates"
+description: "setMultiple updates multiple keys in one render cycle, preventing cascading re-renders. Learn plain object, functional, and Immer draft patterns."
+---
+
+Every time you call `setState` on a NexusStore store, the store notifies all its subscribers and React schedules a re-render for any component that reads the updated key. Calling `setState` twice in a row on the same store therefore triggers two separate notification cycles — potentially two render passes — even though both updates are logically a single operation. `setMultiple` solves this by batching all changes into one atomic update: the store notifies listeners exactly once, and React renders exactly once.
+
+## The Problem with Multiple `setState` Calls
+
+```js title="❌ Two setState calls — two render cycles"
+store.setState(
+  (keys) => keys.auth,
+  (draft) => {
+    draft.isLoggedin = false;
+  },
+);
+store.setState(
+  (keys) => keys.theme,
+  (draft) => {
+    draft.mode = "light";
+  },
+);
+```
+
+```js title="✅ One setMultiple call — one render cycle"
+store.setMultiple((draft) => {
+  draft.auth.isLoggedin = false;
+  draft.theme.mode = "light";
+  draft.theme.color = "#ffffff";
+});
+```
+
+The second snippet produces the same final state but triggers a single notification, keeping your component tree stable.
+
+## Three Update Patterns
+
+<Tabs>
+  <Tab title="Immer draft (simplest)">
+    When your store is wrapped with `immer()`, pass a draft mutator function directly to `setMultiple`. The entire store's current state arrives as a mutable draft — assign to any keys you want to change and leave the rest untouched.
+
+    The `SetMultiple` component in the demo app demonstrates this pattern:
+
+    ```jsx title="src/components/SetMultiple.jsx"
+    import { useSelector } from "../store/hooks";
+    import { store } from "../store/store";
+
+    export default function SetMultiple() {
+      const auth = useSelector((state) => state.auth);
+      const theme = useSelector((state) => state.theme);
+
+      function handleAuthAndTheme() {
+        store.setMultiple((draft) => {
+          draft.auth.isLoggedin = false;
+          draft.theme.mode = "light";
+          draft.theme.color = "#ffffff";
+        });
+      }
+
+      return (
+        <fieldset>
+          <legend>Cart</legend>
+          <p>Auth: {auth.isLoggedin ? "Logged In" : "Logged Out"}</p>
+          <p style={{ border: `1px solid ${theme.color}` }}>
+            Theme: {theme.mode}
+          </p>
+          <button onClick={handleAuthAndTheme}>Set Multiple</button>
+        </fieldset>
+      );
+    }
+    ```
+
+    <Tip>
+      To inspect draft values in the console, use `current(draft)` from the `immer` package. Logging the proxy directly produces an unreadable output.
+    </Tip>
+  </Tab>
+
+  <Tab title="Plain object merge">
+    Pass a plain object to `setMultiple` when you have static values that don't depend on current state. NexusStore shallowly merges the object into the store — any key you omit stays exactly as it was.
+
+    ```js title="Plain object — keys are shallow-merged"
+    store.setMultiple({
+      auth: {
+        isLoggedin: false,
+      },
+      theme: {
+        mode: "light",
+        color: "#ffffff",
+      },
+    });
+    ```
+
+    In this example, `cart` and `settings` are not mentioned, so they remain in the store unchanged. Only `auth` and `theme` are overwritten with the values provided.
+  </Tab>
+
+  <Tab title="Functional update (non-Immer)">
+    When your store is not Immer-wrapped but you still need to derive the next state from the current one, pass a function that receives the full current state and returns a partial update object. NexusStore merges the returned object automatically — there is no need to spread `...state` yourself.
+
+    ```js title="Functional update — receives current state, returns partial object"
+    store.setMultiple((state) => ({
+      auth: {
+        isLoggedin: !state.auth.isLoggedin,
+      },
+      theme: {
+        mode: "light",
+        color: "#ffffff",
+      },
+    }));
+    ```
+
+    Because NexusStore performs the merge, omitting `cart` and `settings` from the returned object does not remove them from the store.
+  </Tab>
+</Tabs>
+
+## Replacing the Entire Store with `replaceStore`
+
+By default `setMultiple` merges. Pass `true` as the second argument to replace the store entirely — the object you provide (or return from your function) becomes the complete new state.
+
+```js title="replaceStore: true — the returned object is the new store"
+store.setMultiple(
+  {
+    auth: { isLoggedin: false },
+    theme: { mode: "light", color: "#ffffff" },
+  },
+  true,
+);
+```
+
+The Immer + `replaceStore` pattern lets you read current values from the draft while returning a fresh object:
+
+```js title="Immer draft + replaceStore — read draft, return new object"
+store.setMultiple(
+  (draft) => ({
+    auth: { isLoggedin: !draft.auth.isLoggedin },
+    theme: { mode: "light", color: "#ffffff" },
+  }),
+  true,
+);
+```
+
+<Warning>
+  When `replaceStore` is `true`, **any key you omit from the returned object is permanently removed from the store**. Every top-level key that should survive the update must be explicitly included. If you spread `...state` inside a `replaceStore` call, all existing keys are preserved, which defeats the purpose of the replace flag.
+</Warning>
+
+## When to Use Each API
+
+<CardGroup cols={3}>
+  <Card title="setState" icon="pencil">
+    Updating a **single top-level key** in the store. Works for both primitive values and nested objects (with or without Immer).
+  </Card>
+  <Card title="setMultiple" icon="layer-group">
+    Updating **two or more keys in the same store** at once. Emits a single notification — one render cycle regardless of how many keys change.
+  </Card>
+  <Card title="Separate setState calls" icon="arrows-split-up-and-left">
+    Updating keys that live in **different stores**. `setMultiple` only operates within one store, so you must call each store's `setState` individually.
+  </Card>
+</CardGroup>
+
+| Scenario | Recommended approach |
+|---|---|
+| Toggle a boolean | `setState` with a direct value or functional update |
+| Update nested object/array | `setState` with an Immer draft function |
+| Log out and reset theme at once | `setMultiple` on a shared store |
+| Reset entire store to defaults | `setMultiple` with `replaceStore: true` |
+| Update `authStore` and `themeStore` together | Separate `setState` on each store |

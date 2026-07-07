@@ -1,0 +1,198 @@
+---
+title: "setState — Update a Single Store Key"
+sidebarTitle: "setState"
+description: "setState(selectKeyFn, nextStateOrFn) updates one top-level key in a NexusStore store. Accepts a direct value or updater function. Top-level keys only."
+---
+
+`setState` is the single-key update method on every NexusStore store. You identify the key to update through a selector function that receives the store's internal `keys` object, then provide either a new value directly or a function that derives the next value from the current one. After the update, all subscribed listeners — including any `useStore` hooks watching that key — are notified in a single synchronous pass. When the store is wrapped with `immer()`, functional updaters automatically receive an Immer draft instead of the raw current value.
+
+## Signature
+
+```ts
+store.setState(
+  selectKeyFn: (keys: Record<string, string>) => string,
+  nextStateOrFn: T | ((currentState: T) => T)
+): void
+```
+
+## Parameters
+
+<ParamField path="selectKeyFn" type="(keys: Record<string, string>) => string" required>
+  A function that receives the store's internal `keys` object — a `{ key: 'key' }` map of every top-level key in the initial state — and returns the string key to update. This indirection provides IDE autocompletion and guards against typos.
+
+  ```js
+  // Keys object for a store initialized with { count: 0, theme: "light" }
+  // { count: "count", theme: "theme" }
+
+  store.setState((keys) => keys.count, 1);
+  //              ^^^^  autocompletion works here
+  ```
+</ParamField>
+
+<ParamField path="nextStateOrFn" type="T | ((currentState: T) => T)" required>
+  The update to apply to the selected key. Two forms are accepted:
+
+  - **Direct value**: any value of the same type as the key's current state. Applied as-is.
+  - **Updater function**: a function that receives the current value of the selected key and returns the next value. With an Immer-wrapped store, the function receives a mutable draft.
+</ParamField>
+
+## Top-Level Keys Only
+
+`setState` can only address **top-level keys** of the initial state object. You cannot select a nested property by chaining keys inside the selector.
+
+```js
+// ✅ Correct — selects the top-level "cart" key
+store.setState((keys) => keys.cart, newCartValue);
+
+// ❌ Wrong — "cart.items" is not a key in the keys object
+store.setState((keys) => keys.cart.items, newItems);
+```
+
+To update a nested field, select its top-level parent key and return the entire updated subtree — or use an Immer draft to mutate just the nested field.
+
+## Two Update Patterns
+
+<CodeGroup>
+
+```js title="Direct value"
+import { createStore } from "./NexusStore/core";
+
+const themeStore = createStore({ theme: "light" });
+
+// Replace the value directly — no function needed
+themeStore.setState((keys) => keys.theme, "dark");
+
+console.log(themeStore.getState().theme); // "dark"
+```
+
+```js title="Functional update"
+import { createStore } from "./NexusStore/core";
+
+const countStore = createStore({ count: 0 });
+
+// Derive the next value from the current one
+countStore.setState(
+  (keys) => keys.count,
+  (curr) => curr + 1,
+);
+
+// Safely decrement — never go below 0
+countStore.setState(
+  (keys) => keys.count,
+  (curr) => Math.max(0, curr - 1),
+);
+```
+
+</CodeGroup>
+
+## With an Immer-Wrapped Store
+
+When the store is created with `immer(createStore(...))`, every functional updater is automatically wrapped with Immer's `produce`. The function receives a **mutable draft** of the current value — you mutate it in place and Immer produces the next immutable state for you.
+
+```jsx title="CartComponent.jsx — Immer draft on a nested object"
+import { useCallback } from "react";
+import { useSelector } from "../store/hooks";
+import { store } from "../store/store";
+// store = immer(createStore({ ..., cart: { items: [...] }, ... }))
+
+export default function CartComponent() {
+  const cartItems = useSelector(useCallback((state) => state.cart.items, []));
+
+  function handlePushItem() {
+    store.setState(
+      (keys) => keys.cart,
+      (draft) => {
+        // Mutate directly — no spread required
+        draft.items.push("Kiwi");
+      },
+    );
+  }
+
+  function handleRemoveItem() {
+    store.setState(
+      (keys) => keys.cart,
+      (draft) => {
+        draft.items.pop();
+      },
+    );
+  }
+
+  return (
+    <fieldset>
+      <legend>Cart</legend>
+      <ul>
+        {cartItems.map((cartItem) => (
+          <li key={cartItem}>{cartItem}</li>
+        ))}
+      </ul>
+      <button onClick={handlePushItem}>Push Item</button>
+      <button onClick={handleRemoveItem}>Remove Item</button>
+    </fieldset>
+  );
+}
+```
+
+## With Plain `produce` (No Store Wrapping)
+
+If you prefer not to wrap the entire store with `immer()`, you can apply Immer's `produce` manually on a per-call basis. This is the pattern used in `AuthComponent.jsx` with the plain `authStore`:
+
+```jsx title="AuthComponent.jsx — manual produce on a plain store"
+import { useAuthStore } from "../store/hooks";
+import { authStore } from "../store/store";
+import { produce } from "immer";
+// authStore = createStore({ auth: { isLoggedin: false } })  (plain, no immer wrapper)
+
+export default function AuthComponent() {
+  const auth = useAuthStore((state) => state.auth);
+
+  return (
+    <fieldset>
+      <legend>Auth</legend>
+      <p>{auth.isLoggedin ? "Logged In" : "Logged Out"}</p>
+      <button
+        onClick={() =>
+          authStore.setState(
+            (keys) => keys.auth,
+            produce((draft) => {
+              draft.isLoggedin = !draft.isLoggedin;
+            }),
+          )
+        }
+      >
+        Toggle Auth
+      </button>
+    </fieldset>
+  );
+}
+```
+
+<Note>
+  `produce((draft) => { ... })` returns a curried function. When `setState` evaluates `nextStateOrFn(currentState)`, it passes the current `auth` object as the base to Immer's produced function — giving you the same draft experience without wrapping the whole store.
+</Note>
+
+## Object Identity Check
+
+Before notifying listeners, `setState` compares the current value and the next value with `Object.is`. If they are identical, **no update is dispatched and no listeners are called**. This means:
+
+- Setting a primitive to its existing value is a no-op.
+- With Immer, if the draft mutation produces no actual change, Immer returns the original reference and the update is silently skipped.
+- With plain functional updates, returning the current value unchanged suppresses re-renders.
+
+## Error Cases
+
+Both error conditions are logged to `console.error` and cause `setState` to return early without modifying state.
+
+**`selectKeyFn` is not a function:**
+
+```
+[Store Error]: The first argument must be a selector function.
+Usage: setState((keys) => keys.username, nextValue)
+```
+
+**The returned key does not exist in the initial state:**
+
+```
+[Store Error]: Selected key "${key}" is invalid or does not exist in the initial state.
+```
+
+This fires when `selectKeyFn` returns `undefined`, `null`, or a string that was not a key in `initialStoreState` — for example, if you try to address a nested path like `keys.cart.items` (which evaluates to the string `"items"`, not a top-level key).
