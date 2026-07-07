@@ -1,5 +1,5 @@
 ---
-title: "setState — Update a Single Store Key"
+title: "setState API — Update a Single NexusStore Store Key"
 sidebarTitle: "setState"
 description: "setState(selectKeyFn, nextStateOrFn) updates one top-level key in a NexusStore store. Accepts a direct value or updater function. Top-level keys only."
 ---
@@ -55,7 +55,7 @@ To update a nested field, select its top-level parent key and return the entire 
 <CodeGroup>
 
 ```js title="Direct value"
-import { createStore } from "./NexusStore/core";
+import { createStore } from "../NexusStore/core";
 
 const themeStore = createStore({ theme: "light" });
 
@@ -66,7 +66,7 @@ console.log(themeStore.getState().theme); // "dark"
 ```
 
 ```js title="Functional update"
-import { createStore } from "./NexusStore/core";
+import { createStore } from "../NexusStore/core";
 
 const countStore = createStore({ count: 0 });
 
@@ -185,8 +185,7 @@ Both error conditions are logged to `console.error` and cause `setState` to retu
 **`selectKeyFn` is not a function:**
 
 ```
-[Store Error]: The first argument must be a selector function.
-Usage: setState((keys) => keys.username, nextValue)
+[Store Error]: The first argument must be a selector function. Usage: setState((keys) => keys.username, nextValue)
 ```
 
 **The returned key does not exist in the initial state:**

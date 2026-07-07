@@ -1,7 +1,7 @@
 ---
-title: "createStore — NexusStore Store Factory"
+title: "createStore — NexusStore's Core Store Factory Function"
 sidebarTitle: "createStore"
-description: "createStore(initialState) creates a NexusStore store. Returns getState, subscribe, setState, and setMultiple. Must be called outside React components."
+description: "createStore(initialStoreState) creates a NexusStore store. Returns getState, subscribe, setState, and setMultiple. Must be called outside React components."
 ---
 
 `createStore` is the foundational factory function of NexusStore. You pass it a plain JavaScript object representing your initial state, and it returns a store object that holds that state, manages subscriptions, and exposes two update methods — `setState` for targeting a single top-level key and `setMultiple` for batching updates across many keys in a single render cycle. The returned store is framework-agnostic: it works standalone, inside React via `useStore`, or wrapped with `immer()` for mutation-style updates.
@@ -92,7 +92,7 @@ function MyComponent() {
 <CodeGroup>
 
 ```js title="Simple counter store"
-import { createStore } from "./NexusStore/core";
+import { createStore } from "../NexusStore/core";
 
 const countStore = createStore({
   count: 0,
@@ -114,7 +114,7 @@ console.log(countStore.getState().count); // 42
 ```
 
 ```js title="Multi-key store"
-import { createStore } from "./NexusStore/core";
+import { createStore } from "../NexusStore/core";
 
 const store = createStore({
   auth: {
@@ -139,8 +139,8 @@ const store = createStore({
 ```
 
 ```js title="Immer-wrapped store"
-import { createStore } from "./NexusStore/core";
-import { immer } from "./NexusStore/immer";
+import { createStore } from "../NexusStore/core";
+import { immer } from "../NexusStore/immer";
 
 // Wrap with immer() so functional updaters receive a mutable draft
 export const store = immer(createStore({
@@ -167,8 +167,7 @@ store.setState(
 **First argument is not a function:**
 
 ```
-[Store Error]: The first argument must be a selector function.
-Usage: setState((keys) => keys.username, nextValue)
+[Store Error]: The first argument must be a selector function. Usage: setState((keys) => keys.username, nextValue)
 ```
 
 This fires when you pass a string, number, or any non-function value as the first argument to `setState`.

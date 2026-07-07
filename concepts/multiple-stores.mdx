@@ -1,5 +1,5 @@
 ---
-title: "Structuring Multiple Stores by Domain"
+title: "How to Manage Multiple NexusStore Stores by Domain"
 sidebarTitle: "Multiple Stores"
 description: "Split your app's state into domain-specific NexusStore stores. Learn when to use one store vs many and how to design a clean store architecture."
 ---
@@ -22,6 +22,7 @@ The `src/store/store.js` file in the source repo shows two separate, focused sto
 
 ```js title="src/store/store.js"
 import { createStore } from "../NexusStore/core";
+import { immer } from "../NexusStore/immer";
 
 // Thin store: one key, one concern
 const themeState = {
@@ -59,7 +60,7 @@ const state = {
 
 export const themeStore = createStore(themeState);
 export const authStore  = createStore(authState);
-export const store      = createStore(state);
+export const store      = immer(createStore(state));
 ```
 
 `themeStore` and `authStore` are small single-key stores — easy to test, easy to extend, and impossible to accidentally bloat. `store` groups several domains that belong to the same application context and may need to update together (see `setMultiple` below).

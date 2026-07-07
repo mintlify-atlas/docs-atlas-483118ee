@@ -1,7 +1,7 @@
 ---
-title: "setMultiple — Batch Update Multiple Store Keys"
+title: "setMultiple — Batch Update Multiple NexusStore Keys"
 sidebarTitle: "setMultiple"
-description: "setMultiple updates multiple keys in one render cycle. Accepts a plain object, function, or Immer draft mutator, with an optional replaceStore flag."
+description: "setMultiple(nextStateOrFn, replaceStore?) updates multiple keys in one render cycle. Accepts a plain object, function, or Immer draft mutator."
 ---
 
 `setMultiple` lets you update any number of top-level keys in a single operation. Rather than calling `setState` once per key — which would notify all listeners and potentially trigger a re-render after each individual call — `setMultiple` computes the entire next state first and then fires listeners exactly once. This is the right tool whenever two or more keys need to change together atomically, such as clearing auth state and resetting a theme in the same user action.
@@ -78,7 +78,7 @@ export default function SetMultiple() {
 Pass a partial state object. It is shallow-merged into the existing store state, so only the keys you include are updated. Keys you omit are left untouched.
 
 ```js title="Plain object merge"
-import { store } from "./store/store";
+import { store } from "../store/store";
 
 // Only "auth" and "theme" are updated.
 // "cart" and "settings" remain unchanged.
@@ -98,7 +98,7 @@ store.setMultiple({
 Pass a function that receives the current state and returns a partial object. Use this pattern when the new values depend on the existing state.
 
 ```js title="Functional update — derive from current state"
-import { store } from "./store/store";
+import { store } from "../store/store";
 
 // Toggle isLoggedin based on its current value
 store.setMultiple((state) => ({
@@ -144,13 +144,12 @@ store.setMultiple(
   When `replaceStore` is `true`, every top-level key that is absent from the new object is **permanently removed** from the store. Any component subscribed to a removed key will receive `undefined` on the next render. Use this flag only when you intentionally want a full reset — for example, after a logout that wipes all user-specific state.
 </Warning>
 
-## Error Case — Invalid Return Value
+## Error Case — Invalid State Value
 
-If `nextStateOrFn` is a function and it returns something that is not a plain object — such as `null`, an array, or a primitive — `setMultiple` logs an error and aborts without touching state:
+If the resolved state — whether from a direct value or a function's return — is not a plain object (e.g. it is `null`, an array, or a primitive), `setMultiple` logs an error and aborts without touching state:
 
 ```
-[Store Error]: State update failed. Expected an object or a function returning an object.
-Please check your setMultiple arguments.
+[Store Error]: State update failed. Expected an object or a function returning an object. Please check your setMultiple arguments.
 ```
 
 ## setState Twice vs. setMultiple Once

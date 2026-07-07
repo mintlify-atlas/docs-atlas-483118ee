@@ -1,5 +1,5 @@
 ---
-title: "Subscribing to State with useStore"
+title: "Subscribing to NexusStore State Using the useStore Hook"
 sidebarTitle: "Using useStore"
 description: "The useStore hook connects React components to NexusStore stores. Use selectors to subscribe to specific slices and prevent unnecessary re-renders."
 ---
@@ -14,6 +14,17 @@ Under the hood, `useStore` delegates to React's built-in `useSyncExternalStore` 
 import { useCallback, useSyncExternalStore } from "react";
 
 export function useStore(storeRef, selector) {
+    if (selector !== undefined && typeof selector !== "function") {
+        throw new Error(
+            `[Store Error]: Invalid selector type.\n\n` +
+                `Expected: "function"\n` +
+                `Received: "${typeof selector}"\n\n` +
+                `Usage Examples:\n` +
+                `- Specific state: useStore(store, (state) => state.value)\n` +
+                `- Complete store: useStore(store)`,
+        );
+    }
+
     const getSnapshot = useCallback(() => {
         const fullState = storeRef.getState();
         return selector ? selector(fullState) : fullState;

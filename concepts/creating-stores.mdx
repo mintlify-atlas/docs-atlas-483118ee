@@ -1,5 +1,5 @@
 ---
-title: "Creating Stores with createStore"
+title: "Creating NexusStore Stores with the createStore API"
 sidebarTitle: "Creating Stores"
 description: "Learn how to create and structure NexusStore stores using createStore. Covers initial state, the returned store object, and where to define stores."
 ---
@@ -127,6 +127,7 @@ As your application grows, you will naturally group related state into separate,
 
 ```js title="src/store/store.js"
 import { createStore } from "../NexusStore/core";
+import { immer } from "../NexusStore/immer";
 
 // Dedicated store for UI theme
 const themeState = {
@@ -164,7 +165,7 @@ const state = {
 
 export const themeStore = createStore(themeState);
 export const authStore = createStore(authState);
-export const store = createStore(state);
+export const store = immer(createStore(state));
 ```
 
 Exporting each store from a dedicated `store.js` file keeps your state definitions central and easy to find from any component.

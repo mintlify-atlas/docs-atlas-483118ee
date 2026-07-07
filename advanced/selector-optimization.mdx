@@ -1,5 +1,5 @@
 ---
-title: "Optimizing Re-renders with Stable Selectors"
+title: "Optimizing Re-renders with Stable Selectors in React"
 sidebarTitle: "Selector Optimization"
 description: "Inline selector functions create new references on every render. Use module-level selectors or useCallback to keep subscriptions stable and fast."
 ---
@@ -25,9 +25,7 @@ This works correctly — the component only re-renders when `cart.items` actuall
 Define the selector outside the component at module scope. A module-level function is created once when the module loads and its reference never changes, regardless of how many times the component re-renders.
 
 ```jsx title="Module-level selector — zero reference churn"
-import { useCallback } from "react";
 import { useSelector } from "../store/hooks";
-import { store } from "../store/store";
 
 // Defined once at module scope — reference is permanently stable
 const cartItemsSelector = (state) => state.cart.items;

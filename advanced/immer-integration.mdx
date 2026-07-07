@@ -1,5 +1,5 @@
 ---
-title: "Using Immer with NexusStore for Nested State"
+title: "Using Immer with NexusStore for Nested State Updates"
 sidebarTitle: "Immer Integration"
 description: "NexusStore's immer() wrapper enables mutation-style updates for nested objects and arrays without spread operators. Learn both integration patterns."
 ---
@@ -102,6 +102,16 @@ Both snippets produce identical state — the Immer version just reads the way y
     ```js title="src/store/store.js"
     import { createStore } from "../NexusStore/core";
     import { immer } from "../NexusStore/immer";
+
+    const themeState = {
+      theme: "light",
+    };
+
+    const authState = {
+      auth: {
+        isLoggedin: false,
+      },
+    };
 
     const state = {
       auth: {

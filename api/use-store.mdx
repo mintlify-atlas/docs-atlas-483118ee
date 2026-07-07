@@ -1,5 +1,5 @@
 ---
-title: "useStore — Subscribe to NexusStore in React"
+title: "useStore — Read NexusStore State in React Components"
 sidebarTitle: "useStore"
 description: "useStore(storeRef, selector?) reads NexusStore state in React. Built on useSyncExternalStore for concurrent-mode safety and fine-grained subscriptions."
 ---
@@ -32,8 +32,8 @@ useStore(storeRef: Store, selector?: (state: State) => T): T | State
 When called with only a store reference, `useStore` returns the entire state object. The component re-renders any time any key in the store changes, regardless of which key the component actually uses.
 
 ```jsx title="Subscribing to the full store"
-import { useStore } from "./NexusStore/useStore";
-import { store } from "./store/store";
+import { useStore } from "../NexusStore/useStore";
+import { store } from "../store/store";
 
 function FullStateDebugger() {
   const state = useStore(store);
